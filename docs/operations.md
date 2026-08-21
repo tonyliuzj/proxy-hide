@@ -24,6 +24,15 @@ unit.
 This consolidated layout is the supported self-hosted default. It deliberately
 trades independent process scaling for fewer containers and simpler upgrades.
 
+## First-run ownership
+
+When the user table is empty, the web origin opens a one-time administrator
+setup page. Complete this before exposing the installation to an untrusted
+network: the first successful submission becomes the platform administrator.
+The database serializes concurrent attempts, and setup closes as soon as any
+user exists. Later administrator password recovery remains available through
+the host-only `make admin` command.
+
 ## Failure behavior
 
 - PostgreSQL is the authoritative source for workspaces, endpoint credentials,

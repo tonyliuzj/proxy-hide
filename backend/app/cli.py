@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.db import SessionLocal, dispose_engine, utcnow
 from app.models import User, UserRole
 from app.security import hash_password
+from app.services.bootstrap import acquire_admin_bootstrap_lock
 
 cli = typer.Typer(help="Proxy Hide administrative commands.")
 
@@ -20,6 +21,7 @@ def main() -> None:
 async def _bootstrap_admin(email: str, password: str) -> None:
     normalized_email = email.strip().lower()
     async with SessionLocal() as db:
+        await acquire_admin_bootstrap_lock(db)
         existing = await db.scalar(select(User).where(User.email == normalized_email))
         if existing is not None:
             if existing.role != UserRole.PLATFORM_ADMIN:

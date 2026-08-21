@@ -42,6 +42,10 @@ export interface SessionDto {
   csrf_token: string;
 }
 
+export interface SetupStatusDto {
+  setup_required: boolean;
+}
+
 export interface WorkspaceAdminDto extends WorkspaceSummaryDto {
   owner: UserDto;
   limits: WorkspaceLimitsDto;

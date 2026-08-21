@@ -49,6 +49,30 @@ class LoginRequest(Schema):
         return value.strip().lower()
 
 
+class SetupRequest(Schema):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=12, max_length=1024)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if len(normalized) < 3:
+            raise ValueError("email must contain at least 3 characters")
+        return normalized
+
+    @field_validator("password")
+    @classmethod
+    def limit_password_bytes(cls, value: str) -> str:
+        if len(value.encode()) > 1024:
+            raise ValueError("password must not exceed 1024 bytes")
+        return value
+
+
+class SetupStatus(Schema):
+    setup_required: bool
+
+
 class WorkspaceSummary(Schema):
     id: UUID
     name: str

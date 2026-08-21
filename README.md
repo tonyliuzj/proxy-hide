@@ -27,8 +27,11 @@ partial platform.
 
 1. Copy `.env.example` to `.env` and replace all three development secrets.
 2. Run `make up`. This builds and starts the four containers in the background.
-3. Create the first operator with `make admin`.
-4. Open <http://localhost:3000>.
+3. Open <http://localhost:3000> and create the first platform administrator.
+
+Until the first account exists, `/` and `/login` open the one-time setup page.
+After setup, that page closes and the normal sign-in screen is used. `make admin`
+remains available to replace an administrator password from the host.
 
 Use `make logs` to follow the combined backend and web logs, and `make down` to
 stop the installation.

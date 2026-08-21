@@ -29,10 +29,12 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
 class CSRFMiddleware(BaseHTTPMiddleware):
     _SAFE_METHODS: ClassVar[frozenset[str]] = frozenset({"GET", "HEAD", "OPTIONS"})
-    _EXEMPT_PATHS: ClassVar[frozenset[str]] = frozenset({"/api/v1/auth/login"})
+    _TOKEN_EXEMPT_PATHS: ClassVar[frozenset[str]] = frozenset(
+        {"/api/v1/auth/login", "/api/v1/auth/setup"}
+    )
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        if request.method in self._SAFE_METHODS or request.url.path in self._EXEMPT_PATHS:
+        if request.method in self._SAFE_METHODS:
             return await call_next(request)
         if not request.url.path.startswith("/api/v1/"):
             return await call_next(request)
@@ -42,6 +44,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return error_response(
                 request, 403, "ORIGIN_REJECTED", "The request origin is not allowed."
             )
+        if request.url.path in self._TOKEN_EXEMPT_PATHS:
+            return await call_next(request)
         token = request.cookies.get(settings.session_cookie_name)
         header_token = request.headers.get("x-csrf-token")
         cookie_token = request.cookies.get(settings.csrf_cookie_name)

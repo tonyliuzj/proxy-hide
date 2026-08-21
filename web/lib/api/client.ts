@@ -11,6 +11,7 @@ export class ApiError extends Error {
 
 const API_ROOT = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1";
 const CSRF_COOKIE = process.env.NEXT_PUBLIC_CSRF_COOKIE_NAME ?? "proxyhide_csrf";
+const CSRF_BOOTSTRAP_PATHS = new Set(["/auth/login", "/auth/setup"]);
 
 function csrfToken() {
   if (typeof document === "undefined") return undefined;
@@ -30,7 +31,7 @@ export function buildQuery(params: Record<string, string | number | boolean | un
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method?.toUpperCase() ?? "GET";
-  const csrf = !["GET", "HEAD", "OPTIONS"].includes(method) && path !== "/auth/login" ? csrfToken() : undefined;
+  const csrf = !["GET", "HEAD", "OPTIONS"].includes(method) && !CSRF_BOOTSTRAP_PATHS.has(path) ? csrfToken() : undefined;
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
     credentials: "include",

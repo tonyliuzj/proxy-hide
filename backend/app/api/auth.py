@@ -1,15 +1,24 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Request, Response, status
 from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import utcnow
 from app.dependencies import DB, CurrentPrincipal
 from app.errors import APIError
-from app.models import User, Workspace, WorkspaceStatus
-from app.schemas import LoginRequest, Message, SessionView, UserView, WorkspaceSummary
+from app.models import AuditEvent, User, UserRole, Workspace, WorkspaceStatus
+from app.schemas import (
+    LoginRequest,
+    Message,
+    SessionView,
+    SetupRequest,
+    SetupStatus,
+    UserView,
+    WorkspaceSummary,
+)
 from app.security import generate_csrf_token, hash_password, password_needs_rehash, verify_password
+from app.services.bootstrap import acquire_admin_bootstrap_lock
 from app.sessions import SessionData
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -46,6 +55,79 @@ def _set_session_cookies(response: Response, token: str, csrf_token: str) -> Non
     response.headers["Cache-Control"] = "no-store"
 
 
+async def _start_session(
+    request: Request,
+    response: Response,
+    user: User,
+    workspace: Workspace | None,
+) -> SessionView:
+    csrf_token = generate_csrf_token()
+    session = SessionData.create(
+        user_id=user.id,
+        role=user.role.value,
+        workspace_id=user.workspace_id,
+        csrf_token=csrf_token,
+        password_changed_at=user.password_changed_at,
+    )
+    token = await request.app.state.session_store.create(session)
+    _set_session_cookies(response, token, csrf_token)
+    return _session_view(user, workspace, csrf_token)
+
+
+@router.get("/setup/status", response_model=SetupStatus)
+async def setup_status(response: Response, db: DB) -> SetupStatus:
+    user_exists = (await db.scalar(select(User.id).limit(1))) is not None
+    response.headers["Cache-Control"] = "no-store"
+    return SetupStatus(setup_required=not user_exists)
+
+
+@router.post(
+    "/setup",
+    response_model=SessionView,
+    status_code=status.HTTP_201_CREATED,
+)
+async def setup(
+    payload: SetupRequest,
+    request: Request,
+    response: Response,
+    db: DB,
+) -> SessionView:
+    await acquire_admin_bootstrap_lock(db)
+    if (await db.scalar(select(User.id).limit(1))) is not None:
+        raise APIError(
+            409,
+            "SETUP_ALREADY_COMPLETED",
+            "Initial setup has already been completed.",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    now = utcnow()
+    user = User(
+        email=payload.email,
+        password_hash=hash_password(payload.password),
+        password_changed_at=now,
+        last_login_at=now,
+        role=UserRole.PLATFORM_ADMIN,
+        active=True,
+    )
+    db.add(user)
+    await db.flush()
+    db.add(
+        AuditEvent(
+            workspace_id=None,
+            actor_user_id=user.id,
+            action="platform_admin.bootstrapped",
+            resource_type="user",
+            resource_id=user.id,
+            ip_address=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent", "")[:500] or None,
+            details={"email": user.email},
+        )
+    )
+    await db.commit()
+    return await _start_session(request, response, user, None)
+
+
 @router.post("/login", response_model=SessionView)
 async def login(payload: LoginRequest, request: Request, response: Response, db: DB) -> SessionView:
     user = await db.scalar(select(User).where(User.email == payload.email))
@@ -59,17 +141,7 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
         user.password_hash = hash_password(payload.password)
     user.last_login_at = utcnow()
     await db.commit()
-    csrf_token = generate_csrf_token()
-    session = SessionData.create(
-        user_id=user.id,
-        role=user.role.value,
-        workspace_id=user.workspace_id,
-        csrf_token=csrf_token,
-        password_changed_at=user.password_changed_at,
-    )
-    token = await request.app.state.session_store.create(session)
-    _set_session_cookies(response, token, csrf_token)
-    return _session_view(user, workspace, csrf_token)
+    return await _start_session(request, response, user, workspace)
 
 
 @router.get("/me", response_model=SessionView)

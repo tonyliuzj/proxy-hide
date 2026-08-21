@@ -1,0 +1,90 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --font-sans: var(--font-sans);
+}
+
+:root {
+  --background: #f7f8f8;
+  --foreground: #182126;
+  --card: #ffffff;
+  --card-foreground: #182126;
+  --popover: #ffffff;
+  --popover-foreground: #182126;
+  --primary: #087f70;
+  --primary-foreground: #ffffff;
+  --secondary: #edf1f1;
+  --secondary-foreground: #28373d;
+  --muted: #eef1f2;
+  --muted-foreground: #647178;
+  --accent: #e9f1ef;
+  --accent-foreground: #145e55;
+  --destructive: #c43d42;
+  --border: #dce2e4;
+  --input: #cfd7da;
+  --ring: #0f8b7c;
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  border-color: var(--border);
+  letter-spacing: 0;
+}
+
+html {
+  min-width: 320px;
+  background: var(--background);
+}
+
+body {
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+button,
+[role="button"] {
+  cursor: pointer;
+}
+
+button:disabled,
+[role="button"][aria-disabled="true"] {
+  cursor: default;
+}
+
+::selection {
+  background: #bce7df;
+  color: #123630;
+}
+
+.recharts-cartesian-axis-tick-value {
+  fill: var(--muted-foreground);
+  font-size: 11px;
+}
+
+.recharts-tooltip-wrapper:focus-visible {
+  outline: none;
+}

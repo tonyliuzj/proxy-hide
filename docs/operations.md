@@ -4,13 +4,25 @@
 
 Proxy Hide intentionally does not bundle a reverse proxy or certificate
 automation. Route the application origin to `web:3000`; Next.js forwards
-`/api/v1` to `api:8000`. A production HTTP proxy URL uses TLS on port 443 at an
-external L4 terminator and forwards the decrypted HTTP proxy protocol to
-`gateway:9000`. The direct port 9000 listener is compatibility-only.
+`/api/v1` to `backend:8000`. A production HTTP proxy URL uses TLS on port 443 at
+an external L4 terminator and forwards the decrypted HTTP proxy protocol to
+`backend:9000`. The direct port 9000 listener is compatibility-only.
 
 Only accept PROXY protocol metadata from the configured terminator CIDRs.
 Untrusted connections are interpreted as ordinary HTTP proxy traffic and may
 not override their source address with forwarded headers.
+
+## Runtime layout
+
+The standard Compose deployment runs exactly four persistent containers:
+`web`, `backend`, `postgres`, and `redis`. The backend container runs the API,
+scheduler, Redis Stream worker, and proxy gateway as separate child processes.
+It applies Alembic migrations before starting any of them and exits if a
+required process stops, allowing Compose to restart the complete backend as one
+unit.
+
+This consolidated layout is the supported self-hosted default. It deliberately
+trades independent process scaling for fewer containers and simpler upgrades.
 
 ## Failure behavior
 
@@ -35,6 +47,8 @@ URLs.
 ## Backup and upgrades
 
 Back up PostgreSQL before upgrading. Redis AOF is useful for operational
-continuity but is not a substitute for the database backup. Deploy new images,
-run `alembic upgrade head` once, and then restart API, scheduler, workers, and
-gateway. Never run multiple incompatible schema versions concurrently.
+continuity but is not a substitute for the database backup. Deploy the new
+`backend` and `web` images together. The backend applies pending migrations
+before it starts its API, scheduler, worker, or gateway processes; if migration
+fails, the backend remains unavailable. Never run multiple incompatible schema
+versions concurrently.

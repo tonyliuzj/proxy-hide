@@ -5,29 +5,57 @@ pooling, and rotation platform. Operators maintain a shared masked catalog while
 workspace owners can combine it with private upstreams and publish authenticated
 HTTP proxy endpoints.
 
-## Services
+## Containers
 
-| Service | Purpose | Default port |
+The default deployment has four long-running containers. The control-plane and
+data-plane processes share one backend container to keep a small self-hosted
+installation easy to operate.
+
+| Container | Purpose | Default port |
 | --- | --- | --- |
 | `web` | Next.js operations console | `3000` |
-| `api` | FastAPI control plane and probe endpoint | `8000` |
-| `gateway` | Explicit HTTP/CONNECT proxy | `9000` |
-| `scheduler` | Durable source/check scheduling | none |
-| `worker` | Redis Stream jobs and pool materialization | none |
+| `backend` | FastAPI, scheduler, job worker, and explicit HTTP/CONNECT gateway | `8000`, `9000` |
 | `postgres` | Authoritative state | internal |
 | `redis` | Sessions, streams, and pool notifications | internal |
+
+On startup, `backend` applies pending database migrations and then launches the
+API, scheduler, worker, and gateway as separate Python processes. If migration
+fails or a required process exits, the container fails instead of running a
+partial platform.
 
 ## Start locally
 
 1. Copy `.env.example` to `.env` and replace all three development secrets.
-2. Run `make bootstrap`.
+2. Run `make up`. This builds and starts the four containers in the background.
 3. Create the first operator with `make admin`.
-4. Run `make up` and open <http://localhost:3000>.
+4. Open <http://localhost:3000>.
+
+Use `make logs` to follow the combined backend and web logs, and `make down` to
+stop the installation.
+
+## Docker Hub images
+
+Only two project images are needed. Both are published in the private
+`tonyliuzj/proxy-hide` Docker Hub repository, using the `backend` and `web`
+tags. PostgreSQL and Redis use their official images.
+
+`make up` builds the project images from the checked-out source. To deploy the
+published images instead, authenticate to Docker Hub and start Compose without
+building:
+
+```console
+docker login
+docker compose pull
+docker compose up -d --no-build
+```
+
+The backend image includes the API, scheduler, worker, gateway, and migrations;
+there are no separate project images for those internal processes.
 
 The web console is served over plaintext only for local development. In
 production, place the web/API origin behind HTTPS. Publish a TLS-wrapped HTTP
 proxy listener on port 443 through an external L4 terminator and forward it to
-the gateway on port 9000. Configure its CIDR in `TRUSTED_PROXY_CIDRS` before
+the backend on port 9000. Configure its CIDR in `TRUSTED_PROXY_CIDRS` before
 accepting PROXY v2 metadata.
 
 Port 9000 remains an optional plaintext compatibility listener. Basic proxy

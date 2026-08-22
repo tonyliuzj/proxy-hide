@@ -4,7 +4,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
+  BellRing,
   Boxes,
+  BookOpen,
   ChevronDown,
   CircleGauge,
   Database,
@@ -40,12 +42,12 @@ type NavItem = { label: string; href: string; icon: typeof Gauge };
 const workspaceNavigation: { label: string; items: NavItem[] }[] = [
   { label: "Overview", items: [{ label: "Dashboard", href: "/dashboard", icon: Gauge }] },
   { label: "Inventory", items: [{ label: "Proxies", href: "/proxies", icon: Network }, { label: "Sources", href: "/sources", icon: Database }, { label: "Targets", href: "/targets", icon: Target }] },
-  { label: "Routing", items: [{ label: "Filters", href: "/filters", icon: Filter }, { label: "Pools", href: "/pools", icon: Boxes }, { label: "Endpoints", href: "/endpoints", icon: Globe2 }] },
-  { label: "Operations", items: [{ label: "Checks", href: "/checks", icon: ListChecks }, { label: "Traffic", href: "/traffic", icon: Activity }, { label: "Settings", href: "/settings", icon: Settings }] },
+  { label: "Routing", items: [{ label: "Filters", href: "/filters", icon: Filter }, { label: "Pools", href: "/pools", icon: Boxes }, { label: "Endpoints", href: "/endpoints", icon: Globe2 }, { label: "Connection guide", href: "/connection-guide", icon: BookOpen }] },
+  { label: "Operations", items: [{ label: "Checks", href: "/checks", icon: ListChecks }, { label: "Traffic", href: "/traffic", icon: Activity }, { label: "Alerts", href: "/alerts", icon: BellRing }, { label: "Access", href: "/access", icon: UsersRound }, { label: "Settings", href: "/settings", icon: Settings }] },
 ];
 
 const adminNavigation: { label: string; items: NavItem[] }[] = [
-  { label: "Platform", items: [{ label: "Overview", href: "/admin", icon: CircleGauge }, { label: "Workspaces", href: "/admin/workspaces", icon: UsersRound }, { label: "Global catalog", href: "/admin/catalog", icon: Globe2 }] },
+  { label: "Platform", items: [{ label: "Overview", href: "/admin", icon: CircleGauge }, { label: "Statistics", href: "/admin/statistics", icon: Activity }, { label: "Workspaces", href: "/admin/workspaces", icon: UsersRound }, { label: "Global catalog", href: "/admin/catalog", icon: Globe2 }] },
 ];
 
 function Navigation({ mode, onNavigate }: { mode: ShellMode; onNavigate?: () => void }) {
@@ -80,6 +82,7 @@ export function AppShell({ children, mode = "workspace" }: { children: React.Rea
       return;
     }
     if (!session) return;
+    if (mode === "workspace" && session.must_change_password && pathname !== "/settings") router.replace("/settings");
     if (mode === "admin" && session.user.role !== "platform_admin") router.replace("/dashboard");
     if (mode === "workspace" && session.user.role === "platform_admin") router.replace("/admin");
   }, [mode, router, session, sessionQuery.error]);

@@ -71,7 +71,7 @@ export function adaptFilter(dto: FilterDto): ProxyFilter {
 }
 
 export function adaptPool(dto: PoolDto): Pool {
-  return { id: dto.id, name: dto.name, filterName: dto.filter_id, strategy: dto.strategy, enabled: dto.enabled, catalogSelection: dto.catalog_selection, currentRevision: dto.current_revision ?? 0, eligibleCount: null, activeConnections: null, averageLatencyMs: null, updatedAt: dto.materialized_at ?? dto.created_at };
+  return { id: dto.id, name: dto.name, filterName: dto.filter_id, strategy: dto.strategy, enabled: dto.enabled, catalogSelection: dto.catalog_selection, currentRevision: dto.current_revision ?? 0, eligibleCount: null, activeConnections: null, averageLatencyMs: null, updatedAt: dto.materialized_at ?? dto.created_at, materializedAt: dto.materialized_at ?? undefined };
 }
 
 export function adaptEndpoint(dto: EndpointDto): Endpoint {

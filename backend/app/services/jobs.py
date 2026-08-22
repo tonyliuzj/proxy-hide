@@ -32,7 +32,7 @@ def enqueue_job(
     db.add(job)
     db.add(
         OutboxEvent(
-            topic="jobs",
+            topic=("jobs_priority" if (payload or {}).get("reason") == "manual" else "jobs"),
             aggregate_id=job.id,
             payload={
                 "job_id": str(job.id),

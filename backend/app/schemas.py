@@ -7,6 +7,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 from app.models import (
+    AlertSeverity,
+    AlertStatus,
     CatalogSelection,
     HealthStatus,
     JobStatus,
@@ -85,12 +87,15 @@ class UserView(Schema):
     email: str
     role: UserRole
     workspace_id: UUID | None
+    active: bool
+    must_change_password: bool
 
 
 class SessionView(Schema):
     user: UserView
     workspace: WorkspaceSummary | None
     csrf_token: str
+    must_change_password: bool = False
 
 
 class WorkspaceLimitsInput(Schema):
@@ -105,6 +110,7 @@ class WorkspaceLimitsInput(Schema):
     requests_per_minute: int = Field(default=600, ge=1, le=100_000_000)
     global_catalog_enabled: bool = True
     destination_ports: list[int] = Field(default_factory=lambda: [80, 443], max_length=100)
+    retention_days: int = Field(default=30, ge=1, le=3650)
 
     @field_validator("destination_ports")
     @classmethod
@@ -152,6 +158,114 @@ class PasswordChange(Schema):
     new_password: str = Field(min_length=12, max_length=1024)
 
 
+class MemberCreate(Schema):
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=12, max_length=1024)
+    role: Literal["workspace_owner", "workspace_operator", "workspace_viewer"]
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return value.strip().lower()
+
+
+class MemberUpdate(Schema):
+    role: Literal["workspace_owner", "workspace_operator", "workspace_viewer"] | None = None
+    active: bool | None = None
+    password: str | None = Field(default=None, min_length=12, max_length=1024)
+
+
+class APITokenCreate(Schema):
+    name: str = Field(min_length=2, max_length=120)
+    scopes: list[Literal["read", "write", "admin"]] = Field(default=["read"])
+    expires_at: datetime | None = None
+
+
+class APITokenView(Schema):
+    id: UUID
+    name: str
+    token_prefix: str
+    scopes: list[str]
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    last_used_ip: str | None
+    revoked_at: datetime | None
+    created_at: datetime
+
+
+class APITokenCreated(APITokenView):
+    token: str
+
+
+class SessionRecord(Schema):
+    id: str
+    created_at: datetime
+    current: bool = False
+
+
+class AlertView(Schema):
+    id: UUID
+    workspace_id: UUID | None
+    severity: AlertSeverity
+    status: AlertStatus
+    code: str
+    title: str
+    message: str
+    resource_type: str | None
+    resource_id: UUID | None
+    details: dict[str, Any]
+    acknowledged_at: datetime | None
+    resolved_at: datetime | None
+    created_at: datetime
+
+
+class AlertUpdate(Schema):
+    status: Literal["acknowledged", "resolved"]
+
+
+class WebhookCreate(Schema):
+    name: str = Field(min_length=2, max_length=120)
+    url: HttpUrl
+    events: list[str] = Field(default_factory=lambda: ["alert.created"], max_length=50)
+    enabled: bool = True
+
+
+class WebhookUpdate(Schema):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    url: HttpUrl | None = None
+    events: list[str] | None = Field(default=None, max_length=50)
+    enabled: bool | None = None
+    rotate_secret: bool = False
+
+
+class WebhookView(Schema):
+    id: UUID
+    name: str
+    url: str
+    events: list[str]
+    enabled: bool
+    last_delivery_at: datetime | None
+    last_delivery_status: str | None
+    created_at: datetime
+
+
+class WebhookCreated(WebhookView):
+    secret: str
+
+
+class WebhookDeliveryView(Schema):
+    id: UUID
+    webhook_id: UUID
+    event: str
+    status: str
+    attempt: int
+    response_status: int | None
+    response_body: str | None
+    next_attempt_at: datetime | None
+    delivered_at: datetime | None
+    created_at: datetime
+
+
 class ProxyImportRequest(Schema):
     text: str = Field(min_length=1, max_length=20_000_000)
     default_protocol: ProxyProtocol = ProxyProtocol.HTTP
@@ -184,6 +298,11 @@ class ProxyImportResult(Schema):
     imported: int
     duplicates: int
     invalid: int
+    operation_id: UUID
+
+
+class ProxyCheckAllResult(Schema):
+    queued: int
     operation_id: UUID
 
 
@@ -360,6 +479,12 @@ class PoolCreate(Schema):
     enabled: bool = True
 
 
+class WorkspaceGlobalPoolCreate(Schema):
+    name: str = Field(min_length=1, max_length=120)
+    rules: dict[str, Any]
+    strategy: PoolStrategy = PoolStrategy.WEIGHTED_HEALTH
+
+
 class PoolUpdate(Schema):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     filter_id: UUID | None = None
@@ -412,6 +537,20 @@ class EndpointCreated(EndpointView):
     secure_url: str
 
 
+class ConnectionGuideView(Schema):
+    secure_host: str
+    secure_port: int
+    plaintext_host: str
+    plaintext_port: int
+    socks_host: str
+    socks_port: int
+
+
+class AdminWorkspaceConnectionGuideView(ConnectionGuideView):
+    workspace_name: str
+    endpoints: list[EndpointView]
+
+
 class JobView(Schema):
     id: UUID
     type: JobType
@@ -425,6 +564,17 @@ class JobView(Schema):
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None
+
+
+class AdminQueuedJobView(JobView):
+    workspace_id: UUID | None
+
+
+class AdminQueueStatistics(Schema):
+    queued: int
+    running: int
+    total: int
+    items: list[AdminQueuedJobView]
 
 
 class CheckAttemptView(Schema):

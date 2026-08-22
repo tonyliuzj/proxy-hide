@@ -12,12 +12,32 @@ from app.db import utcnow
 from app.dependencies import DB, PaginationDep, WorkspacePrincipal, enforce_quota, paginate
 from app.errors import APIError
 from app.models import Endpoint, JobType, Pool
-from app.schemas import EndpointCreate, EndpointCreated, EndpointUpdate, EndpointView, Page
+from app.schemas import (
+    ConnectionGuideView,
+    EndpointCreate,
+    EndpointCreated,
+    EndpointUpdate,
+    EndpointView,
+    Page,
+)
 from app.security import digest_endpoint_secret, generate_endpoint_secret
 from app.services.audit import record_audit
 from app.services.jobs import enqueue_job
 
 router = APIRouter(prefix="/endpoints", tags=["endpoints"])
+
+
+@router.get("/connection-guide", response_model=ConnectionGuideView)
+async def connection_guide(principal: WorkspacePrincipal) -> ConnectionGuideView:
+    settings = get_settings()
+    return ConnectionGuideView(
+        secure_host=settings.public_gateway_tls_host,
+        secure_port=settings.public_gateway_tls_port,
+        plaintext_host=settings.public_gateway_host,
+        plaintext_port=settings.public_gateway_http_port,
+        socks_host=settings.public_gateway_host,
+        socks_port=settings.public_gateway_socks_port,
+    )
 
 
 def _normalize_allowlist(values: list[str]) -> list[str]:

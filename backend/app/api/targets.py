@@ -34,6 +34,10 @@ router = APIRouter(prefix="/targets", tags=["targets"])
 _BUILTIN_URLS = {
     TargetKind.GOOGLE: "https://www.google.com/search?q=proxyhide-health-check",
     TargetKind.BING: "https://www.bing.com/search?q=proxyhide-health-check",
+    TargetKind.BRAVE: "https://search.brave.com/search?q=proxyhide-health-check",
+    TargetKind.STARTPAGE: "https://www.startpage.com/sp/search?query=proxyhide-health-check",
+    TargetKind.DUCKDUCKGO: "https://duckduckgo.com/html/?q=proxyhide-health-check",
+    TargetKind.WIKIPEDIA: "https://en.wikipedia.org/w/index.php?search=proxyhide-health-check",
 }
 _PROHIBITED_HEADERS = {
     "connection",

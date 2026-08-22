@@ -19,13 +19,14 @@ import { useQueryClient } from "@tanstack/react-query";
 const schema = z.object({ text: z.string().min(1, "Paste at least one proxy").max(20_000_000), defaultProtocol: z.enum(["http", "https", "socks4a", "socks5"]) });
 type Values = z.infer<typeof schema>;
 
-export function ProxyImportDialog({ admin = false }: { admin?: boolean }) {
+export function ProxyImportDialog({ admin = false, workspaceId }: { admin?: boolean; workspaceId?: string }) {
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<ProxyImportPreviewDto>();
   const [working, setWorking] = useState(false);
   const queryClient = useQueryClient();
   const form = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { text: "", defaultProtocol: "http" } });
-  const basePath = admin ? "/admin/proxies" : "/proxies";
+  const basePath = workspaceId ? `/admin/workspaces/${workspaceId}/proxies` : admin ? "/admin/proxies" : "/proxies";
+  const inventoryLabel = workspaceId ? "workspace private" : admin ? "global" : "private";
 
   async function previewImport(values: Values) {
     setWorking(true);
@@ -45,7 +46,7 @@ export function ProxyImportDialog({ admin = false }: { admin?: boolean }) {
     try {
       const result = await api.post<ProxyImportResultDto>(`${basePath}/import`, { text: values.text, default_protocol: values.defaultProtocol });
       toast.success(`${result.imported} proxies queued for initial checks`);
-      await queryClient.invalidateQueries({ queryKey: admin ? ["admin", "proxies"] : ["proxies"] });
+      await queryClient.invalidateQueries({ queryKey: workspaceId ? ["admin", "workspaces", workspaceId, "proxies"] : admin ? ["admin", "proxies"] : ["proxies"] });
       setOpen(false);
       setPreview(undefined);
       form.reset();
@@ -59,7 +60,7 @@ export function ProxyImportDialog({ admin = false }: { admin?: boolean }) {
   return <Dialog open={open} onOpenChange={(value) => { setOpen(value); if (!value) setPreview(undefined); }}>
     <DialogTrigger asChild><Button size="sm"><Upload />Import proxies</Button></DialogTrigger>
     <DialogContent className="max-w-2xl">
-      <DialogHeader><DialogTitle>Import {admin ? "global" : "private"} proxies</DialogTitle><DialogDescription>Paste one proxy per line. Credentials are encrypted after import and never shown again.</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>Import {inventoryLabel} proxies</DialogTitle><DialogDescription>Paste one proxy per line. Credentials are encrypted after import and never shown again.</DialogDescription></DialogHeader>
       <form className="space-y-4" onSubmit={form.handleSubmit(previewImport)}>
         <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
           <div className="space-y-2"><Label>Default protocol</Label><Controller control={form.control} name="defaultProtocol" render={({ field }) => <Select value={field.value} onValueChange={(value) => { field.onChange(value); setPreview(undefined); }}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="http">HTTP</SelectItem><SelectItem value="https">HTTPS</SelectItem><SelectItem value="socks4a">SOCKS4a</SelectItem><SelectItem value="socks5">SOCKS5</SelectItem></SelectContent></Select>} /></div>

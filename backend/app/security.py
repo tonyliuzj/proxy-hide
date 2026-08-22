@@ -127,6 +127,14 @@ def generate_endpoint_secret() -> str:
     return secrets.token_urlsafe(32)
 
 
+def generate_api_token() -> str:
+    return f"ph_v1_{secrets.token_urlsafe(36)}"
+
+
+def digest_api_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
 def endpoint_hmac_key_bytes(settings: Settings | None = None) -> bytes:
     settings = settings or get_settings()
     configured = settings.endpoint_hmac_key.strip()

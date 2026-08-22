@@ -29,6 +29,7 @@ def _session_view(user: User, workspace: Workspace | None, csrf_token: str) -> S
         user=UserView.model_validate(user),
         workspace=WorkspaceSummary.model_validate(workspace) if workspace else None,
         csrf_token=csrf_token,
+        must_change_password=user.must_change_password,
     )
 
 
@@ -147,7 +148,11 @@ async def login(payload: LoginRequest, request: Request, response: Response, db:
 @router.get("/me", response_model=SessionView)
 async def me(principal: CurrentPrincipal, response: Response) -> SessionView:
     response.headers["Cache-Control"] = "no-store"
-    return _session_view(principal.user, principal.workspace, principal.session.csrf_token)
+    return _session_view(
+        principal.user,
+        principal.workspace,
+        principal.session.csrf_token if principal.session else "",
+    )
 
 
 @router.post("/logout", response_model=Message)

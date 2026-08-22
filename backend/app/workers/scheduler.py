@@ -75,6 +75,7 @@ async def _run_leader(stopped: asyncio.Event, redis: Any) -> None:
         redis,
         SQLAlchemyOutboxRepository(SessionLocal),
         jobs_stream=settings.jobs_stream,
+        priority_jobs_stream=f"{settings.jobs_stream}:priority",
     )
     scheduler_task = asyncio.create_task(scheduler.run(), name="due-work-scheduler")
     outbox_task = asyncio.create_task(outbox.run(), name="database-outbox-relay")

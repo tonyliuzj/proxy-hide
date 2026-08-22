@@ -282,6 +282,38 @@ def bing_check_spec() -> CheckSpec:
     )
 
 
+def brave_check_spec() -> CheckSpec:
+    return CheckSpec(
+        url="https://search.brave.com/search?q=proxyhide-connectivity-check",
+        headers=(("Accept", "text/html"),),
+        status_ranges=((200, 399),),
+    )
+
+
+def startpage_check_spec() -> CheckSpec:
+    return CheckSpec(
+        url="https://www.startpage.com/sp/search?query=proxyhide-connectivity-check",
+        headers=(("Accept", "text/html"),),
+        status_ranges=((200, 399),),
+    )
+
+
+def duckduckgo_check_spec() -> CheckSpec:
+    return CheckSpec(
+        url="https://duckduckgo.com/html/?q=proxyhide-connectivity-check",
+        headers=(("Accept", "text/html"),),
+        status_ranges=((200, 399),),
+    )
+
+
+def wikipedia_check_spec() -> CheckSpec:
+    return CheckSpec(
+        url="https://en.wikipedia.org/w/index.php?search=proxyhide-connectivity-check",
+        headers=(("Accept", "text/html"),),
+        status_ranges=((200, 399),),
+    )
+
+
 def _compile_safe_pattern(pattern: str) -> re2._Regexp:
     if len(pattern) > 512:
         raise ValueError("regex pattern exceeds 512 characters")

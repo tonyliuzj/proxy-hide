@@ -7,6 +7,8 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models import (
+    Alert,
+    AlertSeverity,
     AuditEvent,
     CheckAttempt,
     CheckJob,
@@ -94,6 +96,18 @@ class SQLAlchemyJobRepository(JobRepository):
             job.error = {"code": "worker_error", "message": error[:500]}
             job.finished_at = datetime.now(UTC) if terminal else None
             if terminal:
+                session.add(
+                    Alert(
+                        workspace_id=job.workspace_id,
+                        severity=AlertSeverity.CRITICAL,
+                        code="job_failed",
+                        title=f"{job.type.value.replace('_', ' ').title()} failed",
+                        message=error[:1000],
+                        resource_type="job",
+                        resource_id=job.id,
+                        details={"attempts": job.attempt, "job_type": job.type.value},
+                    )
+                )
                 await self._finish_operation(session, job, succeeded=False)
 
     async def _mark_operation_running(self, session: AsyncSession, job: CheckJob) -> None:
@@ -133,7 +147,10 @@ class SQLAlchemyOutboxRepository(OutboxRepository):
             events = (
                 await session.scalars(
                     select(OutboxEvent)
-                    .where(OutboxEvent.published_at.is_(None), OutboxEvent.topic == "jobs")
+                    .where(
+                        OutboxEvent.published_at.is_(None),
+                        OutboxEvent.topic.in_(("jobs", "jobs_priority")),
+                    )
                     .order_by(OutboxEvent.created_at, OutboxEvent.id)
                     .limit(limit)
                     .with_for_update(skip_locked=True)
@@ -164,6 +181,10 @@ class SQLAlchemyScheduleRepository(ScheduleRepository):
     async def enqueue_due(self, *, batch_size: int) -> int:
         now = datetime.now(UTC)
         async with self.sessions() as session, session.begin():
+            active_proxy_entities = select(CheckJob.entity_id).where(
+                CheckJob.type == JobType.CHECK_PROXY,
+                CheckJob.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)),
+            )
             route_rows = (
                 await session.execute(
                     select(ProxyRoute, ProxyHealth)
@@ -171,6 +192,7 @@ class SQLAlchemyScheduleRepository(ScheduleRepository):
                     .where(
                         ProxyRoute.active.is_(True),
                         or_(ProxyHealth.proxy_id.is_(None), ProxyHealth.next_check_at <= now),
+                        ProxyRoute.id.not_in(active_proxy_entities),
                     )
                     .order_by(ProxyHealth.next_check_at.asc().nullsfirst(), ProxyRoute.created_at)
                     .limit(batch_size)

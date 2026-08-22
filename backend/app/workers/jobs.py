@@ -78,6 +78,8 @@ class RedisStreamWorker:
         max_attempts: int = 5,
         block_ms: int = 5_000,
         reclaim_idle_ms: int = 60_000,
+        concurrency: int = 25,
+        execution_timeout_seconds: float = 30.0,
     ) -> None:
         self.redis = redis
         self.repository = repository
@@ -89,6 +91,8 @@ class RedisStreamWorker:
         self.max_attempts = max(1, max_attempts)
         self.block_ms = block_ms
         self.reclaim_idle_ms = reclaim_idle_ms
+        self.concurrency = max(1, concurrency)
+        self.execution_timeout_seconds = execution_timeout_seconds
         self._stopped = asyncio.Event()
         self._reclaim_cursor = "0-0"
 
@@ -107,12 +111,13 @@ class RedisStreamWorker:
                 self.group,
                 self.consumer,
                 {self.stream: ">"},
-                count=10,
+                count=self.concurrency,
                 block=self.block_ms,
             )
             for _, messages in entries or ():
-                for message_id, fields in messages:
-                    await self.process(message_id, fields)
+                await asyncio.gather(
+                    *(self.process(message_id, fields) for message_id, fields in messages)
+                )
 
     async def process(self, message_id: str | bytes, fields: Mapping[object, object]) -> None:
         try:
@@ -129,7 +134,8 @@ class RedisStreamWorker:
             await self._fail(message_id, job, f"unsupported job type: {job.type}")
             return
         try:
-            await handler(job)
+            async with asyncio.timeout(self.execution_timeout_seconds):
+                await handler(job)
             await self.repository.succeed(job)
         except asyncio.CancelledError:
             raise

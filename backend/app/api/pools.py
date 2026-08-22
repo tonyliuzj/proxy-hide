@@ -91,7 +91,7 @@ async def create_pool(
         workspace_id=principal.workspace_id,
         entity_id=pool.id,
         operation=operation,
-        payload={"reason": "pool_created"},
+        payload={"reason": "manual", "trigger": "pool_created"},
     )
     record_audit(
         db,
@@ -143,7 +143,7 @@ async def update_pool(
         workspace_id=principal.workspace_id,
         entity_id=pool.id,
         operation=operation,
-        payload={"reason": "pool_updated"},
+        payload={"reason": "manual", "trigger": "pool_updated"},
     )
     record_audit(
         db,

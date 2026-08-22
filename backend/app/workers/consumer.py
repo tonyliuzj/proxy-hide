@@ -70,6 +70,17 @@ async def run_consumer() -> None:
         dead_letter_stream=settings.jobs_dead_letter_stream,
         reclaim_idle_ms=5 * 60 * 1000,
     )
+    priority_worker = RedisStreamWorker(
+        redis,
+        SQLAlchemyJobRepository(SessionLocal),
+        handlers.mapping(),
+        stream=f"{settings.jobs_stream}:priority",
+        group=settings.jobs_consumer_group,
+        consumer=consumer_name,
+        dead_letter_stream=settings.jobs_dead_letter_stream,
+        reclaim_idle_ms=60 * 1000,
+        concurrency=10,
+    )
     telemetry = GatewayTelemetryConsumer(
         redis,
         SQLAlchemyTelemetryRepository(SessionLocal),
@@ -78,20 +89,24 @@ async def run_consumer() -> None:
     stopped = asyncio.Event()
     _install_shutdown_handlers(stopped)
     task = asyncio.create_task(worker.run(), name="redis-job-consumer")
+    priority_task = asyncio.create_task(priority_worker.run(), name="redis-priority-job-consumer")
     telemetry_task = asyncio.create_task(telemetry.run(), name="gateway-telemetry-consumer")
     try:
         stop_task = asyncio.create_task(stopped.wait(), name="consumer-shutdown")
         done, _pending = await asyncio.wait(
-            (task, telemetry_task, stop_task), return_when=asyncio.FIRST_COMPLETED
+            (task, priority_task, telemetry_task, stop_task), return_when=asyncio.FIRST_COMPLETED
         )
         if task in done:
             await task
         if telemetry_task in done:
             await telemetry_task
+        if priority_task in done:
+            await priority_task
     finally:
         worker.stop()
+        priority_worker.stop()
         telemetry.stop()
-        for running in (task, telemetry_task):
+        for running in (task, priority_task, telemetry_task):
             running.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await running

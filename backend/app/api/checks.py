@@ -3,16 +3,47 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.dependencies import DB, PaginationDep, WorkspacePrincipal, paginate
+from app.dependencies import DB, AdminPrincipal, PaginationDep, WorkspacePrincipal, paginate
 from app.errors import APIError
 from app.models import CheckAttempt, CheckJob, JobStatus
-from app.schemas import CheckAttemptView, JobView, Page
+from app.schemas import AdminQueuedJobView, AdminQueueStatistics, CheckAttemptView, JobView, Page
 from app.services.audit import record_audit
 from app.services.jobs import enqueue_job
 
 router = APIRouter(prefix="/checks", tags=["checks"])
+admin_router = APIRouter(prefix="/admin/checks", tags=["platform admin checks"])
+
+
+@admin_router.get("/queue", response_model=AdminQueueStatistics)
+async def queue_statistics(db: DB, principal: AdminPrincipal) -> AdminQueueStatistics:
+    count_rows = (
+        await db.execute(
+            select(CheckJob.status, func.count(CheckJob.id))
+            .where(CheckJob.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)))
+            .group_by(CheckJob.status)
+        )
+    ).all()
+    counts: dict[JobStatus, int] = {row[0]: row[1] for row in count_rows}
+    jobs = list(
+        (
+            await db.scalars(
+                select(CheckJob)
+                .where(CheckJob.status.in_((JobStatus.QUEUED, JobStatus.RUNNING)))
+                .order_by(CheckJob.created_at.asc())
+                .limit(200)
+            )
+        ).all()
+    )
+    queued = counts.get(JobStatus.QUEUED, 0)
+    running = counts.get(JobStatus.RUNNING, 0)
+    return AdminQueueStatistics(
+        queued=queued,
+        running=running,
+        total=queued + running,
+        items=[AdminQueuedJobView.model_validate(job) for job in jobs],
+    )
 
 
 async def _tenant_job(job_id: UUID, db: DB, workspace_id: UUID) -> CheckJob:

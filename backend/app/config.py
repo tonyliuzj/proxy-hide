@@ -71,6 +71,14 @@ class Settings(BaseSettings):
         default=9000,
         validation_alias=AliasChoices("PH_GATEWAY_PORT", "GATEWAY_PORT"),
     )
+    public_gateway_socks_port: int = Field(
+        default=1080,
+        validation_alias=AliasChoices("PH_PUBLIC_GATEWAY_SOCKS_PORT", "PUBLIC_SOCKS_PROXY_PORT"),
+    )
+    gateway_socks_bind_port: int = Field(
+        default=1080,
+        validation_alias=AliasChoices("PH_GATEWAY_SOCKS_PORT", "GATEWAY_SOCKS_PORT"),
+    )
     trusted_proxy_cidrs: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("PH_TRUSTED_PROXY_CIDRS", "TRUSTED_PROXY_CIDRS"),

@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-
 # Signed-bigint-safe ASCII key "PHADMBST"; advisory lock keys must be unique per subsystem.
 _ADMIN_BOOTSTRAP_LOCK_ID = 0x504841444D425354
 

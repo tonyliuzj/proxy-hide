@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from sqlalchemy import func, select
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.dependencies import DB, WorkspacePrincipal, workspace_limits
+from app.dependencies import DB, OwnerPrincipal, WorkspacePrincipal, workspace_limits
 from app.domain.filters import catalog_scope_clause
 from app.models import (
     CheckJob,
@@ -148,7 +148,7 @@ async def update_settings_view(
     payload: WorkspaceSettingsUpdate,
     request: Request,
     db: DB,
-    principal: WorkspacePrincipal,
+    principal: OwnerPrincipal,
 ) -> WorkspaceSettingsView:
     principal.workspace.name = payload.name.strip()  # type: ignore[union-attr]
     record_audit(
@@ -172,6 +172,7 @@ async def change_password(
 
         raise APIError(422, "CURRENT_PASSWORD_INVALID", "The current password is incorrect.")
     principal.user.password_hash = hash_password(payload.new_password)
+    principal.user.must_change_password = False
     from app.db import utcnow
 
     principal.user.password_changed_at = utcnow()

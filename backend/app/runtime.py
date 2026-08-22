@@ -7,7 +7,6 @@ import signal
 import sys
 from dataclasses import dataclass
 
-
 logger = logging.getLogger("proxyhide.runtime")
 
 

@@ -47,6 +47,26 @@ class WorkspaceStatus(enum.StrEnum):
 class UserRole(enum.StrEnum):
     PLATFORM_ADMIN = "platform_admin"
     WORKSPACE_OWNER = "workspace_owner"
+    WORKSPACE_OPERATOR = "workspace_operator"
+    WORKSPACE_VIEWER = "workspace_viewer"
+
+
+class AlertSeverity(enum.StrEnum):
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class AlertStatus(enum.StrEnum):
+    OPEN = "open"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
+class WebhookDeliveryStatus(enum.StrEnum):
+    PENDING = "pending"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
 
 
 class ProxyScope(enum.StrEnum):
@@ -79,6 +99,10 @@ class TargetAvailability(enum.StrEnum):
 class TargetKind(enum.StrEnum):
     GOOGLE = "google"
     BING = "bing"
+    BRAVE = "brave"
+    STARTPAGE = "startpage"
+    DUCKDUCKGO = "duckduckgo"
+    WIKIPEDIA = "wikipedia"
     CUSTOM = "custom"
 
 
@@ -151,6 +175,7 @@ class WorkspaceLimit(TimestampMixin, Base):
     requests_per_minute: Mapped[int] = mapped_column(Integer, default=600)
     global_catalog_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     destination_ports: Mapped[list[int]] = mapped_column(JSON, default=lambda: [80, 443])
+    retention_days: Mapped[int] = mapped_column(Integer, default=30)
 
     workspace: Mapped[Workspace] = relationship(back_populates="limits")
 
@@ -167,21 +192,35 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     __table_args__ = (
         CheckConstraint(
             "(role = 'platform_admin' AND workspace_id IS NULL) OR "
-            "(role = 'workspace_owner' AND workspace_id IS NOT NULL)",
+            "(role IN ('workspace_owner', 'workspace_operator', 'workspace_viewer') "
+            "AND workspace_id IS NOT NULL)",
             name="role_workspace",
         ),
-        Index(
-            "uq_users_workspace_owner",
-            "workspace_id",
-            unique=True,
-            postgresql_where=(role == UserRole.WORKSPACE_OWNER),
-            sqlite_where=(role == UserRole.WORKSPACE_OWNER),
-        ),
     )
+
+
+class APIToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "api_tokens"
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(16), index=True, nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=lambda: ["read"])
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_ip: Mapped[str | None] = mapped_column(String(45))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_api_token_name"),)
 
 
 class ProxyRoute(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -567,3 +606,68 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class Alert(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "alerts"
+
+    workspace_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    severity: Mapped[AlertSeverity] = mapped_column(
+        enum_type(AlertSeverity, "alert_severity"), index=True
+    )
+    status: Mapped[AlertStatus] = mapped_column(
+        enum_type(AlertStatus, "alert_status"), default=AlertStatus.OPEN, index=True
+    )
+    code: Mapped[str] = mapped_column(String(80), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    message: Mapped[str] = mapped_column(String(1000))
+    resource_type: Mapped[str | None] = mapped_column(String(80))
+    resource_id: Mapped[UUID | None] = mapped_column(Uuid)
+    details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    acknowledged_by: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Webhook(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "webhooks"
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(120))
+    url: Mapped[str] = mapped_column(Text)
+    secret_encrypted: Mapped[bytes] = mapped_column(LargeBinary)
+    events: Mapped[list[str]] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_delivery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_delivery_status: Mapped[str | None] = mapped_column(String(32))
+
+    __table_args__ = (UniqueConstraint("workspace_id", "name", name="uq_webhook_name"),)
+
+
+class WebhookDelivery(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "webhook_deliveries"
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    webhook_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("webhooks.id", ondelete="CASCADE"), index=True
+    )
+    event: Mapped[str] = mapped_column(String(120), index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON)
+    status: Mapped[WebhookDeliveryStatus] = mapped_column(
+        enum_type(WebhookDeliveryStatus, "webhook_delivery_status"),
+        default=WebhookDeliveryStatus.PENDING,
+        index=True,
+    )
+    attempt: Mapped[int] = mapped_column(Integer, default=0)
+    response_status: Mapped[int | None] = mapped_column(Integer)
+    response_body: Mapped[str | None] = mapped_column(String(1000))
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

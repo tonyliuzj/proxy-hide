@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, Form, Query, Request, UploadFile, status
@@ -25,10 +26,12 @@ from app.models import (
     ProxyProtocol,
     ProxyRoute,
     ProxyScope,
+    Target,
 )
 from app.schemas import (
     JobView,
     Page,
+    ProxyCheckAllResult,
     ProxyImportPreview,
     ProxyImportRequest,
     ProxyImportResult,
@@ -295,6 +298,44 @@ async def list_proxies(
     )
 
 
+@router.post("/check-all", response_model=ProxyCheckAllResult, status_code=status.HTTP_202_ACCEPTED)
+async def check_all_proxies(
+    request: Request, db: DB, principal: WorkspacePrincipal
+) -> ProxyCheckAllResult:
+    limits = await workspace_limits(db, principal.workspace_id)
+    visibility = ProxyRoute.workspace_id == principal.workspace_id
+    if limits.global_catalog_enabled:
+        visibility = catalog_scope_clause("combined", principal.workspace_id)
+    route_ids = list(
+        (
+            await db.scalars(select(ProxyRoute.id).where(visibility, ProxyRoute.active.is_(True)))
+        ).all()
+    )
+    operation = create_operation(db, workspace_id=principal.workspace_id, kind="proxy_check_all")
+    await db.flush()
+    for route_id in route_ids:
+        enqueue_job(
+            db,
+            job_type=JobType.CHECK_PROXY,
+            workspace_id=principal.workspace_id,
+            entity_id=route_id,
+            operation=operation,
+            payload={"reason": "manual_all"},
+        )
+    operation.progress_total = len(route_ids)
+    operation.status = OperationStatus.PENDING if route_ids else OperationStatus.SUCCEEDED
+    record_audit(
+        db,
+        request,
+        principal,
+        action="proxy.check_all_requested",
+        resource_type="proxy_route",
+        details={"queued": len(route_ids)},
+    )
+    await db.commit()
+    return ProxyCheckAllResult(queued=len(route_ids), operation_id=operation.id)
+
+
 @router.get("/{proxy_id}", response_model=ProxyView)
 async def get_proxy(proxy_id: UUID, db: DB, principal: WorkspacePrincipal) -> ProxyView:
     limits = await workspace_limits(db, principal.workspace_id)
@@ -313,7 +354,11 @@ async def get_proxy(proxy_id: UUID, db: DB, principal: WorkspacePrincipal) -> Pr
 
 @router.post("/{proxy_id}/check", response_model=JobView, status_code=status.HTTP_202_ACCEPTED)
 async def check_proxy(
-    proxy_id: UUID, request: Request, db: DB, principal: WorkspacePrincipal
+    proxy_id: UUID,
+    request: Request,
+    db: DB,
+    principal: WorkspacePrincipal,
+    target_id: UUID | None = Query(default=None),
 ) -> JobView:
     limits = await workspace_limits(db, principal.workspace_id)
     visibility = ProxyRoute.workspace_id == principal.workspace_id
@@ -328,12 +373,25 @@ async def check_proxy(
     )
     if route is None:
         raise APIError(404, "PROXY_NOT_FOUND", "The proxy was not found.")
+    if target_id is not None:
+        target = await db.scalar(
+            select(Target).where(
+                Target.id == target_id,
+                Target.workspace_id == principal.workspace_id,
+                Target.enabled.is_(True),
+            )
+        )
+        if target is None:
+            raise APIError(404, "TARGET_NOT_FOUND", "The selected test target was not found.")
     job = enqueue_job(
         db,
         job_type=JobType.CHECK_PROXY,
         workspace_id=principal.workspace_id,
         entity_id=route.id,
-        payload={"reason": "manual"},
+        payload={
+            "reason": "manual",
+            **({"target_id": str(target_id)} if target_id is not None else {}),
+        },
     )
     record_audit(
         db,
@@ -431,14 +489,43 @@ async def import_global_proxy_file(
 
 @admin_router.get("", response_model=Page[ProxyView])
 async def list_global_proxies(
-    db: DB, principal: AdminPrincipal, pagination: PaginationDep
+    db: DB,
+    principal: AdminPrincipal,
+    pagination: PaginationDep,
+    q: str | None = Query(default=None, max_length=200),
+    protocol: ProxyProtocol | None = None,
+    health: HealthStatus | None = None,
+    country: str | None = Query(default=None, min_length=2, max_length=2),
+    sort: Literal["created", "address", "country", "health", "score", "latency"] = "created",
+    direction: Literal["asc", "desc"] = "desc",
 ) -> Page[ProxyView]:
     statement = (
         select(ProxyRoute)
         .where(ProxyRoute.scope == ProxyScope.GLOBAL)
+        .outerjoin(ProxyHealth)
         .options(selectinload(ProxyRoute.health))
-        .order_by(ProxyRoute.created_at.desc())
     )
+    if q:
+        term = f"%{q.strip()}%"
+        statement = statement.where(
+            ProxyRoute.host.ilike(term) | ProxyRoute.country_code.ilike(term)
+        )
+    if protocol:
+        statement = statement.where(ProxyRoute.protocol == protocol)
+    if health:
+        statement = statement.where(ProxyHealth.status == health)
+    if country:
+        statement = statement.where(ProxyRoute.country_code == country.upper())
+    sort_column = {
+        "created": ProxyRoute.created_at,
+        "address": ProxyRoute.host,
+        "country": ProxyRoute.country_code,
+        "health": ProxyHealth.status,
+        "score": ProxyHealth.score,
+        "latency": ProxyHealth.latency_ewma_ms,
+    }[sort]
+    order = sort_column.asc() if direction == "asc" else sort_column.desc()
+    statement = statement.order_by(order.nullslast(), ProxyRoute.id)
     routes, total = await paginate(db, statement, pagination)
     # Admins can inspect addresses while credentials remain redacted.
     items = []
@@ -452,3 +539,80 @@ async def list_global_proxies(
         )
         items.append(view)
     return Page(items=items, total=total, page=pagination.page, page_size=pagination.page_size)
+
+
+@admin_router.post(
+    "/check-all",
+    response_model=ProxyCheckAllResult,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def check_all_global_proxies(
+    request: Request, db: DB, principal: AdminPrincipal
+) -> ProxyCheckAllResult:
+    route_ids = list(
+        (
+            await db.scalars(
+                select(ProxyRoute.id).where(
+                    ProxyRoute.scope == ProxyScope.GLOBAL,
+                    ProxyRoute.active.is_(True),
+                )
+            )
+        ).all()
+    )
+    operation = create_operation(db, workspace_id=None, kind="global_proxy_check_all")
+    await db.flush()
+    for route_id in route_ids:
+        enqueue_job(
+            db,
+            job_type=JobType.CHECK_PROXY,
+            workspace_id=None,
+            entity_id=route_id,
+            operation=operation,
+            payload={"reason": "manual_all", "scope": "global"},
+        )
+    operation.progress_total = len(route_ids)
+    operation.status = OperationStatus.PENDING if route_ids else OperationStatus.SUCCEEDED
+    record_audit(
+        db,
+        request,
+        principal,
+        action="global_proxy.check_all_requested",
+        resource_type="proxy_route",
+        details={"queued": len(route_ids)},
+    )
+    await db.commit()
+    return ProxyCheckAllResult(queued=len(route_ids), operation_id=operation.id)
+
+
+@admin_router.post(
+    "/{proxy_id}/check", response_model=JobView, status_code=status.HTTP_202_ACCEPTED
+)
+async def check_global_proxy(
+    proxy_id: UUID, request: Request, db: DB, principal: AdminPrincipal
+) -> JobView:
+    route = await db.scalar(
+        select(ProxyRoute).where(
+            ProxyRoute.id == proxy_id,
+            ProxyRoute.scope == ProxyScope.GLOBAL,
+            ProxyRoute.active.is_(True),
+        )
+    )
+    if route is None:
+        raise APIError(404, "PROXY_NOT_FOUND", "The global proxy was not found.")
+    job = enqueue_job(
+        db,
+        job_type=JobType.CHECK_PROXY,
+        workspace_id=None,
+        entity_id=route.id,
+        payload={"reason": "manual", "scope": "global"},
+    )
+    record_audit(
+        db,
+        request,
+        principal,
+        action="global_proxy.check_requested",
+        resource_type="proxy_route",
+        resource_id=route.id,
+    )
+    await db.commit()
+    return JobView.model_validate(job)

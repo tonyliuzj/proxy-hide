@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 
 from .errors import Forbidden, PoolUnavailable, ProxyAuthenticationRequired
@@ -43,3 +44,9 @@ class EndpointAuthenticator:
         if not endpoint.allows_ip(client_ip):
             raise Forbidden("source IP is not allowed")
         return AuthenticatedEndpoint(endpoint)
+
+    def authenticate_credentials(
+        self, snapshot: GatewaySnapshot, username: str, password: str, client_ip: str
+    ) -> AuthenticatedEndpoint:
+        token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+        return self.authenticate(snapshot, f"Basic {token}", client_ip)

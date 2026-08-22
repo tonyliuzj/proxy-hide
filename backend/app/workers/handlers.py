@@ -38,7 +38,16 @@ from app.models import (
 from app.security import KeyRing, digest_proxy_identity
 from app.services.jobs import enqueue_job
 
-from .checks import CheckSpec, ProxyCheckRunner, bing_check_spec, google_check_spec
+from .checks import (
+    CheckSpec,
+    ProxyCheckRunner,
+    bing_check_spec,
+    brave_check_spec,
+    duckduckgo_check_spec,
+    google_check_spec,
+    startpage_check_spec,
+    wikipedia_check_spec,
+)
 from .feeds import PublicFeedFetcher
 from .geoip import GeoIPResolver
 from .jobs import JobEnvelope
@@ -86,14 +95,68 @@ class WorkerHandlers:
             if route is None or not route.active:
                 return
             upstream = self._upstream(route)
+            job = await session.get(CheckJob, UUID(envelope.job_id))
+            target_id = (
+                UUID(str(job.payload["target_id"]))
+                if job and job.payload.get("target_id")
+                else None
+            )
+            target = await session.get(Target, target_id) if target_id else None
+            if target_id and (
+                target is None
+                or str(target.workspace_id) != envelope.workspace_id
+                or not target.enabled
+            ):
+                return
+            spec = (
+                self._target_spec(target)
+                if target
+                else CheckSpec(
+                    url=_nonce_url(self.settings.general_probe_url), capture_exit_ip=True
+                )
+            )
         result = await self.check_runner.check(
             upstream,
-            CheckSpec(url=_nonce_url(self.settings.general_probe_url), capture_exit_ip=True),
+            spec,
         )
         now = datetime.now(UTC)
         async with self.sessions() as session, session.begin():
             route = await session.get(ProxyRoute, proxy_id, with_for_update=True)
             if route is None:
+                return
+            if target is not None and envelope.workspace_id is not None:
+                workspace_id = UUID(envelope.workspace_id)
+                target_health = await session.get(
+                    TargetHealth, (workspace_id, target.id, proxy_id), with_for_update=True
+                )
+                if target_health is None:
+                    target_health = TargetHealth(
+                        workspace_id=workspace_id,
+                        target_id=target.id,
+                        proxy_id=proxy_id,
+                        availability=result.availability,
+                        checked_at=now,
+                    )
+                    session.add(target_health)
+                target_health.availability = result.availability
+                target_health.latency_ms = result.latency_ms
+                target_health.checked_at = now
+                target_health.error_code = result.error_code.value if result.error_code else None
+                session.add(
+                    CheckAttempt(
+                        workspace_id=workspace_id,
+                        job_id=UUID(envelope.job_id),
+                        proxy_id=proxy_id,
+                        target_id=target.id,
+                        success=result.success,
+                        latency_ms=result.latency_ms,
+                        error_code=result.error_code.value if result.error_code else None,
+                        error_message=result.error_message,
+                        availability=result.availability,
+                        checked_at=now,
+                    )
+                )
+                await self._enqueue_workspace_pools(session, workspace_id, "target_health_changed")
                 return
             health = await session.get(ProxyHealth, proxy_id, with_for_update=True)
             if health is None:
@@ -468,6 +531,14 @@ class WorkerHandlers:
             return google_check_spec()
         if target.kind is TargetKind.BING:
             return bing_check_spec()
+        if target.kind is TargetKind.BRAVE:
+            return brave_check_spec()
+        if target.kind is TargetKind.STARTPAGE:
+            return startpage_check_spec()
+        if target.kind is TargetKind.DUCKDUCKGO:
+            return duckduckgo_check_spec()
+        if target.kind is TargetKind.WIKIPEDIA:
+            return wikipedia_check_spec()
         if not target.url:
             raise ValueError("custom target has no URL")
         aad = f"target:{target.id}".encode()

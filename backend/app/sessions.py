@@ -120,3 +120,54 @@ class SessionStore:
         if keys:
             await self.redis.delete(*keys)
         await self.redis.delete(set_key)
+
+    async def list_user(self, user_id: UUID) -> list[tuple[str, SessionData]]:
+        set_key = f"proxyhide:user-sessions:{user_id}"
+        raw_keys = await self.redis.smembers(set_key)  # type: ignore[misc]
+        keys = [key.decode() if isinstance(key, bytes) else str(key) for key in raw_keys]
+        if not keys:
+            return []
+        values = await self.redis.mget(keys)
+        sessions: list[tuple[str, SessionData]] = []
+        for key, raw in zip(keys, values, strict=True):
+            if not raw:
+                continue
+            try:
+                value = json.loads(raw)
+                sessions.append(
+                    (
+                        key.rsplit(":", 1)[-1],
+                        SessionData(
+                            user_id=UUID(value["user_id"]),
+                            role=value["role"],
+                            workspace_id=(
+                                UUID(value["workspace_id"]) if value["workspace_id"] else None
+                            ),
+                            csrf_token=value["csrf_token"],
+                            password_changed_at=value.get("password_changed_at"),
+                            created_at=value["created_at"],
+                        ),
+                    )
+                )
+            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+                await self.redis.delete(key)
+        return sessions
+
+    async def revoke_session(self, user_id: UUID, session_id: str) -> bool:
+        if len(session_id) != 64 or any(char not in "0123456789abcdef" for char in session_id):
+            return False
+        key = f"proxyhide:session:{session_id}"
+        raw = await self.redis.get(key)
+        if not raw:
+            return False
+        try:
+            value = json.loads(raw)
+            if UUID(value["user_id"]) != user_id:
+                return False
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return False
+        await self.redis.delete(key)
+        await self.redis.srem(f"proxyhide:user-sessions:{user_id}", key)
+        if value.get("workspace_id"):
+            await self.redis.srem(f"proxyhide:workspace-sessions:{value['workspace_id']}", key)
+        return True

@@ -241,6 +241,39 @@ async def test_manual_check_allows_own_private_proxy(
         assert job.payload == {"reason": "manual"}
 
 
+async def test_check_all_queues_every_visible_proxy(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    csrf = await _login(client)
+
+    response = await client.post(
+        "/api/v1/proxies/check-all",
+        headers={"X-CSRF-Token": csrf},
+    )
+
+    assert response.status_code == 202, response.text
+    payload = response.json()
+    assert payload["queued"] == 2
+    async with session_factory() as db:
+        jobs = list(
+            (
+                await db.scalars(
+                    select(CheckJob).where(
+                        CheckJob.workspace_id == seeded.workspace_one_id,
+                        CheckJob.type == JobType.CHECK_PROXY,
+                    )
+                )
+            ).all()
+        )
+        assert {job.entity_id for job in jobs} == {
+            seeded.own_proxy_id,
+            seeded.global_proxy_id,
+        }
+        assert all(job.payload["reason"] == "manual_all" for job in jobs)
+        assert all(job.payload["operation_id"] == payload["operation_id"] for job in jobs)
+
+
 async def test_manual_check_allows_global_proxy_when_catalog_is_enabled(
     client: AsyncClient, session_factory: SessionFactory
 ) -> None:

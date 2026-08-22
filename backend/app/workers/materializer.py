@@ -68,6 +68,9 @@ class PoolMaterializer:
                     rule_snapshot=filter_row.rules,
                 )
             )
+            # PoolMember has a composite foreign key to this revision. Flush it first so
+            # PostgreSQL never observes members before their parent revision exists.
+            await session.flush()
             for ordinal, (route, health) in enumerate(candidates):
                 session.add(
                     PoolMember(

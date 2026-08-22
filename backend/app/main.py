@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from app.api import (
+    access,
     admin,
     audit,
     auth,
@@ -19,6 +20,7 @@ from app.api import (
     endpoints,
     filters,
     inventory,
+    notifications,
     operations,
     pools,
     sources,
@@ -58,7 +60,8 @@ app.add_middleware(
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "X-CSRF-Token", "X-Request-ID"],
+    allow_headers=["Content-Type", "Authorization", "X-CSRF-Token", "X-Request-ID"],
+    expose_headers=["X-RateLimit-Limit", "X-RateLimit-Remaining", "Retry-After"],
 )
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(RequestContextMiddleware)
@@ -66,6 +69,8 @@ install_exception_handlers(app)
 
 api = APIRouter(prefix="/api/v1")
 api.include_router(auth.router)
+api.include_router(access.router)
+api.include_router(notifications.router)
 api.include_router(admin.router)
 api.include_router(inventory.admin_router)
 api.include_router(sources.admin_router)
@@ -75,6 +80,7 @@ api.include_router(targets.router)
 api.include_router(filters.router)
 api.include_router(pools.router)
 api.include_router(endpoints.router)
+api.include_router(checks.admin_router)
 api.include_router(checks.router)
 api.include_router(traffic.router)
 api.include_router(audit.router)

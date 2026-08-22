@@ -29,12 +29,14 @@ class OutboxDispatcher:
         repository: OutboxRepository,
         *,
         jobs_stream: str = "proxyhide:jobs",
+        priority_jobs_stream: str = "proxyhide:jobs:priority",
         batch_size: int = 100,
         idle_seconds: float = 1.0,
     ) -> None:
         self.redis = redis
         self.repository = repository
         self.jobs_stream = jobs_stream
+        self.priority_jobs_stream = priority_jobs_stream
         self.batch_size = batch_size
         self.idle_seconds = idle_seconds
         self._stopped = asyncio.Event()
@@ -48,7 +50,10 @@ class OutboxDispatcher:
                     str(key): "" if value is None else str(value)
                     for key, value in item.payload.items()
                 }
-                await self.redis.xadd(self.jobs_stream, fields)
+                stream = (
+                    self.priority_jobs_stream if item.topic == "jobs_priority" else self.jobs_stream
+                )
+                await self.redis.xadd(stream, fields)
                 await self.repository.mark_published(item.id)
                 published += 1
             except Exception as exc:

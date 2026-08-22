@@ -46,6 +46,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             )
         if request.url.path in self._TOKEN_EXEMPT_PATHS:
             return await call_next(request)
+        if request.headers.get("authorization", "").lower().startswith("bearer "):
+            return await call_next(request)
         token = request.cookies.get(settings.session_cookie_name)
         header_token = request.headers.get("x-csrf-token")
         cookie_token = request.cookies.get(settings.csrf_cookie_name)

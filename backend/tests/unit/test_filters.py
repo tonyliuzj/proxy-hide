@@ -40,9 +40,7 @@ def test_nested_filter_validates_and_compiles() -> None:
     }
     assert validate_filter(payload).version == 1
     statement = (
-        select(ProxyRoute)
-        .outerjoin(ProxyHealth)
-        .where(compile_filter(payload, workspace_id))
+        select(ProxyRoute).outerjoin(ProxyHealth).where(compile_filter(payload, workspace_id))
     )
     sql = str(statement)
     assert "proxy_routes.country_code" in sql

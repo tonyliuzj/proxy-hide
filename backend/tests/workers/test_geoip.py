@@ -38,9 +38,7 @@ class FakeReader:
 
 
 def test_geoip_extracts_country_and_asn(monkeypatch, tmp_path: Path) -> None:
-    reader = FakeReader(
-        {"country": {"iso_code": "gb"}, "autonomous_system_number": 64500}
-    )
+    reader = FakeReader({"country": {"iso_code": "gb"}, "autonomous_system_number": 64500})
     monkeypatch.setattr("maxminddb.open_database", lambda _path: reader)
     resolver = GeoIPResolver(str(tmp_path / "GeoIP.mmdb"))
 

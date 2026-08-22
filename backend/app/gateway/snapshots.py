@@ -160,9 +160,7 @@ class RedisSnapshotLoader:
                 break
             await self.refresh()
             try:
-                await asyncio.wait_for(
-                    self._stopped.wait(), timeout=min(1.0, self.poll_interval)
-                )
+                await asyncio.wait_for(self._stopped.wait(), timeout=min(1.0, self.poll_interval))
             except TimeoutError:
                 pass
 

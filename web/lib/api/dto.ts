@@ -32,14 +32,17 @@ export interface WorkspaceLimitsDto {
 export interface UserDto {
   id: string;
   email: string;
-  role: "workspace_owner" | "platform_admin";
+  role: "workspace_owner" | "workspace_operator" | "workspace_viewer" | "platform_admin";
   workspace_id: string | null;
+  active: boolean;
+  must_change_password: boolean;
 }
 
 export interface SessionDto {
   user: UserDto;
   workspace: WorkspaceSummaryDto | null;
   csrf_token: string;
+  must_change_password: boolean;
 }
 
 export interface SetupStatusDto {
@@ -100,7 +103,7 @@ export interface SourceDto {
 export interface TargetDto {
   id: string;
   name: string;
-  kind: "google" | "bing" | "custom";
+  kind: "google" | "bing" | "brave" | "startpage" | "duckduckgo" | "wikipedia" | "custom";
   enabled: boolean;
   method: "GET" | "HEAD" | "POST";
   url: string | null;
@@ -166,6 +169,17 @@ export interface JobDto {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+}
+
+export interface AdminQueuedJobDto extends JobDto {
+  workspace_id: string | null;
+}
+
+export interface AdminQueueStatisticsDto {
+  queued: number;
+  running: number;
+  total: number;
+  items: AdminQueuedJobDto[];
 }
 
 export interface TrafficPointDto {

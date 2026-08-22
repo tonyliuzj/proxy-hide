@@ -11,6 +11,7 @@ from app.security import KeyRing, endpoint_hmac_key_bytes
 from .auth import EndpointAuthenticator
 from .server import GatewayConfig, GatewayServer
 from .snapshots import EncryptedSnapshotCodec, RedisSnapshotLoader, SnapshotStore
+from .socks5 import Socks5Config, Socks5Server
 from .telemetry import TelemetryBuffer
 
 
@@ -45,14 +46,24 @@ async def run_gateway() -> None:
             trusted_proxy_networks=trusted_networks,
         ),
     )
+    socks = Socks5Server(
+        snapshots=snapshots,
+        authenticator=gateway.authenticator,
+        gateway=gateway,
+        config=Socks5Config(host=settings.gateway_bind_host, port=settings.gateway_socks_bind_port),
+    )
     loader_task = asyncio.create_task(loader.run(), name="gateway-snapshot-loader")
     telemetry_task = asyncio.create_task(telemetry.run(redis), name="gateway-telemetry")
+    http_server = await gateway.start()
+    socks_server = await socks.start()
     try:
-        await gateway.serve_forever()
+        async with http_server, socks_server:
+            await asyncio.gather(http_server.serve_forever(), socks_server.serve_forever())
     finally:
         loader.stop()
         telemetry.stop()
         await gateway.close()
+        await socks.close()
         for task in (loader_task, telemetry_task):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

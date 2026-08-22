@@ -1,9 +1,9 @@
 "use client";
 
 import { adaptAdminWorkspace, adaptDashboardSummary, adaptEndpoint, adaptFilter, adaptJob, adaptPage, adaptPool, adaptProxy, adaptSource, adaptTarget, adaptTrafficSummary, adaptWorkspaceSettings } from "@/lib/api/adapters";
-import type { DashboardSummaryDto, EndpointDto, FilterDto, JobDto, PageDto, PoolDto, ProxyDto, SourceDto, TargetDto, TrafficSummaryDto, WorkspaceAdminDto, WorkspaceSettingsDto } from "@/lib/api/dto";
+import type { AdminQueueStatisticsDto, DashboardSummaryDto, EndpointDto, FilterDto, JobDto, PageDto, PoolDto, ProxyDto, SourceDto, TargetDto, TrafficSummaryDto, WorkspaceAdminDto, WorkspaceSettingsDto } from "@/lib/api/dto";
 import { useApiQuery } from "@/lib/api/hooks";
-import type { AdminWorkspace, DashboardSummary, Endpoint, JobRun, ListResponse, Pool, ProxyFilter, ProxyRecord, Source, Target, TrafficSummary, WorkspaceSettings } from "@/lib/api/types";
+import type { AdminQueueStatistics, AdminWorkspace, DashboardSummary, Endpoint, JobRun, ListResponse, Pool, ProxyFilter, ProxyRecord, Source, Target, TrafficSummary, WorkspaceSettings } from "@/lib/api/types";
 import { buildQuery } from "@/lib/api/client";
 
 type Params = Record<string, string | number | boolean | undefined>;
@@ -16,8 +16,12 @@ export const usePools = (params: Params = {}) => useApiQuery<ListResponse<Pool>,
 export const useEndpoints = (params: Params = {}) => useApiQuery<ListResponse<Endpoint>, PageDto<EndpointDto>>(["endpoints", params], `/endpoints${buildQuery(params)}`, (page) => adaptPage(page, adaptEndpoint));
 export const useJobs = (params: Params = {}) => useApiQuery<ListResponse<JobRun>, PageDto<JobDto>>(["checks", params], `/checks${buildQuery(params)}`, (page) => adaptPage(page, adaptJob));
 export const useAdminWorkspaces = (params: Params = {}) => useApiQuery<ListResponse<AdminWorkspace>, PageDto<WorkspaceAdminDto>>(["admin", "workspaces", params], `/admin/workspaces${buildQuery(params)}`, (page) => adaptPage(page, adaptAdminWorkspace));
+export const useAdminWorkspace = (workspaceId: string) => useApiQuery<AdminWorkspace, WorkspaceAdminDto>(["admin", "workspaces", workspaceId], `/admin/workspaces/${workspaceId}`, adaptAdminWorkspace);
+export const useAdminWorkspaceProxies = (workspaceId: string, params: Params = {}) => useApiQuery<ListResponse<ProxyRecord>, PageDto<ProxyDto>>(["admin", "workspaces", workspaceId, "proxies", params], `/admin/workspaces/${workspaceId}/proxies${buildQuery(params)}`, (page) => adaptPage(page, adaptProxy));
+export const useAdminWorkspaceGlobalPools = (workspaceId: string, params: Params = {}) => useApiQuery<ListResponse<Pool>, PageDto<PoolDto>>(["admin", "workspaces", workspaceId, "global-pools", params], `/admin/workspaces/${workspaceId}/global-pools${buildQuery(params)}`, (page) => adaptPage(page, adaptPool));
 export const useDashboardSummary = () => useApiQuery<DashboardSummary, DashboardSummaryDto>(["dashboard"], "/dashboard", adaptDashboardSummary);
 export const useTraffic = (params: Params = {}) => useApiQuery<TrafficSummary, TrafficSummaryDto>(["traffic", params], `/traffic${buildQuery(params)}`, adaptTrafficSummary);
 export const useWorkspaceSettings = () => useApiQuery<WorkspaceSettings, WorkspaceSettingsDto>(["settings"], "/settings", adaptWorkspaceSettings);
 export const useAdminProxies = (params: Params = {}) => useApiQuery<ListResponse<ProxyRecord>, PageDto<ProxyDto>>(["admin", "proxies", params], `/admin/proxies${buildQuery(params)}`, (page) => adaptPage(page, adaptProxy));
 export const useAdminSources = (params: Params = {}) => useApiQuery<ListResponse<Source>, PageDto<SourceDto>>(["admin", "sources", params], `/admin/sources${buildQuery(params)}`, (page) => adaptPage(page, (source) => ({ ...adaptSource(source), scope: "global" })));
+export const useAdminQueue = () => useApiQuery<AdminQueueStatistics, AdminQueueStatisticsDto>(["admin", "checks", "queue"], "/admin/checks/queue", (data) => ({ queued: data.queued, running: data.running, total: data.total, items: data.items.map((job) => ({ ...adaptJob(job), workspaceId: job.workspace_id ?? undefined })) }));

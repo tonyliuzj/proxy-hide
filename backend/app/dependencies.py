@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -11,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings, get_settings
 from app.db import get_db
 from app.errors import APIError
-from app.models import User, UserRole, Workspace, WorkspaceLimit, WorkspaceStatus
+from app.models import APIToken, User, UserRole, Workspace, WorkspaceLimit, WorkspaceStatus
+from app.security import digest_api_token
 from app.sessions import SessionData
 
 DB = Annotated[AsyncSession, Depends(get_db)]
@@ -21,7 +23,12 @@ DB = Annotated[AsyncSession, Depends(get_db)]
 class Principal:
     user: User
     workspace: Workspace | None
-    session: SessionData
+    session: SessionData | None
+    token_scopes: frozenset[str] = frozenset()
+
+    @property
+    def via_api_token(self) -> bool:
+        return self.session is None
 
     @property
     def workspace_id(self) -> UUID:
@@ -32,6 +39,33 @@ class Principal:
 
 async def current_principal(request: Request, db: DB) -> Principal:
     settings: Settings = get_settings()
+    authorization = request.headers.get("authorization", "")
+    if authorization.lower().startswith("bearer "):
+        raw_token = authorization[7:].strip()
+        api_token = await db.scalar(
+            select(APIToken).where(
+                APIToken.token_digest == digest_api_token(raw_token),
+                APIToken.revoked_at.is_(None),
+            )
+        )
+        now = datetime.now(UTC)
+        if api_token is None or (api_token.expires_at is not None and api_token.expires_at <= now):
+            raise APIError(401, "INVALID_API_TOKEN", "The API token is invalid or expired.")
+        user = await db.get(User, api_token.user_id)
+        workspace = await db.get(Workspace, api_token.workspace_id)
+        if user is None or not user.active or workspace is None:
+            raise APIError(401, "API_TOKEN_REVOKED", "The API token is no longer active.")
+        if workspace.status != WorkspaceStatus.ACTIVE:
+            raise APIError(403, "WORKSPACE_SUSPENDED", "The workspace is suspended.")
+        api_token.last_used_at = now
+        api_token.last_used_ip = request.client.host if request.client else None
+        await db.commit()
+        return Principal(
+            user=user,
+            workspace=workspace,
+            session=None,
+            token_scopes=frozenset(api_token.scopes),
+        )
     token = request.cookies.get(settings.session_cookie_name)
     if not token:
         raise APIError(401, "AUTHENTICATION_REQUIRED", "Authentication is required.")
@@ -61,9 +95,41 @@ async def current_principal(request: Request, db: DB) -> Principal:
 CurrentPrincipal = Annotated[Principal, Depends(current_principal)]
 
 
-async def require_workspace(principal: CurrentPrincipal) -> Principal:
-    if principal.user.role != UserRole.WORKSPACE_OWNER or principal.workspace is None:
+async def require_workspace(request: Request, principal: CurrentPrincipal) -> Principal:
+    if (
+        principal.user.role
+        not in {
+            UserRole.WORKSPACE_OWNER,
+            UserRole.WORKSPACE_OPERATOR,
+            UserRole.WORKSPACE_VIEWER,
+        }
+        or principal.workspace is None
+    ):
         raise APIError(403, "WORKSPACE_ACCESS_REQUIRED", "Workspace owner access is required.")
+    safe = request.method in {"GET", "HEAD", "OPTIONS"}
+    password_route = request.url.path.endswith("/change-password") or (
+        request.url.path.endswith("/settings") and safe
+    )
+    if principal.user.must_change_password and not password_route:
+        raise APIError(403, "PASSWORD_CHANGE_REQUIRED", "Change the initial password to continue.")
+    if principal.user.role == UserRole.WORKSPACE_VIEWER and not safe:
+        raise APIError(403, "READ_ONLY_ROLE", "The viewer role cannot modify workspace resources.")
+    if principal.via_api_token:
+        required = "read" if safe else "write"
+        if required not in principal.token_scopes and "admin" not in principal.token_scopes:
+            raise APIError(
+                403, "TOKEN_SCOPE_REQUIRED", f"The API token requires the {required} scope."
+            )
+    return principal
+
+
+async def require_owner(request: Request, principal: CurrentPrincipal) -> Principal:
+    if principal.user.role != UserRole.WORKSPACE_OWNER or principal.workspace is None:
+        raise APIError(403, "OWNER_ACCESS_REQUIRED", "Workspace owner access is required.")
+    if principal.user.must_change_password and not request.url.path.endswith("/change-password"):
+        raise APIError(403, "PASSWORD_CHANGE_REQUIRED", "Change the initial password to continue.")
+    if principal.via_api_token and "admin" not in principal.token_scopes:
+        raise APIError(403, "TOKEN_SCOPE_REQUIRED", "The API token requires the admin scope.")
     return principal
 
 
@@ -74,6 +140,7 @@ async def require_admin(principal: CurrentPrincipal) -> Principal:
 
 
 WorkspacePrincipal = Annotated[Principal, Depends(require_workspace)]
+OwnerPrincipal = Annotated[Principal, Depends(require_owner)]
 AdminPrincipal = Annotated[Principal, Depends(require_admin)]
 
 

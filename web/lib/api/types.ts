@@ -96,7 +96,7 @@ export interface Target {
   id: string;
   name: string;
   url: string;
-  kind: "google" | "bing" | "custom";
+  kind: "google" | "bing" | "brave" | "startpage" | "duckduckgo" | "wikipedia" | "custom";
   enabled: boolean;
   method: "GET" | "HEAD" | "POST";
   statusRanges: [number, number][];
@@ -133,6 +133,7 @@ export interface Pool {
   activeConnections: number | null;
   averageLatencyMs: number | null;
   updatedAt: string;
+  materializedAt?: string;
 }
 
 export interface Endpoint {
@@ -157,7 +158,7 @@ export interface EndpointCredentials extends Endpoint {
 export interface CheckRun {
   id: string;
   proxy: string;
-  checkType: "general" | "google" | "bing" | "custom";
+  checkType: "general" | "google" | "bing" | "brave" | "startpage" | "duckduckgo" | "wikipedia" | "custom";
   target: string;
   result: "passed" | "failed" | "timeout";
   latencyMs?: number;
@@ -178,6 +179,17 @@ export interface JobRun {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+}
+
+export interface AdminQueuedJob extends JobRun {
+  workspaceId?: string;
+}
+
+export interface AdminQueueStatistics {
+  queued: number;
+  running: number;
+  total: number;
+  items: AdminQueuedJob[];
 }
 
 export interface TrafficPoint {

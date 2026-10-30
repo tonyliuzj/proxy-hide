@@ -10,10 +10,18 @@ describe("API adapters", () => {
   });
 
   it("maps one-time endpoint URLs without deriving them in the client", () => {
-    const endpoint = adaptEndpointCredentials({ id: "e1", name: "UK", pool_id: "pool1", username: "google-uk", enabled: true, ip_allowlist: [], secret_rotated_at: null, created_at: "2026-08-21T00:00:00Z", secret: "secret", plaintext_url: "http://provided", secure_url: "https://provided" });
+    const endpoint = adaptEndpointCredentials({ id: "e1", name: "UK", pool_id: "pool1", username: "google-uk", enabled: true, ip_allowlist: [], listen_port: null, proxy_address: null, require_auth: true, strategy: null, secret_rotated_at: null, created_at: "2026-08-21T00:00:00Z", secret: "secret", plaintext_url: "http://provided", secure_url: "https://provided" });
     expect(endpoint.secret).toBe("secret");
     expect(endpoint.plaintextUrl).toBe("http://provided");
     expect(endpoint.secureUrl).toBe("https://provided");
+  });
+
+  it("maps an open dedicated port that has no secret", () => {
+    const endpoint = adaptEndpointCredentials({ id: "e2", name: "SearX", pool_id: "pool1", username: "open-1a2b3c4d", enabled: true, ip_allowlist: ["192.168.0.0/16"], listen_port: 10000, proxy_address: "localhost:10000", require_auth: false, strategy: "sticky", secret_rotated_at: null, created_at: "2026-08-21T00:00:00Z", secret: null, plaintext_url: null, secure_url: null });
+    expect(endpoint.proxyAddress).toBe("localhost:10000");
+    expect(endpoint.requireAuth).toBe(false);
+    expect(endpoint.strategy).toBe("sticky");
+    expect(endpoint.secret).toBeNull();
   });
 
   it("maps dashboard jobs and traffic aggregates", () => {

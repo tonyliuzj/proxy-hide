@@ -128,6 +128,7 @@ class PoolStrategy(enum.StrEnum):
     ROUND_ROBIN = "round_robin"
     LOWEST_LATENCY = "lowest_latency"
     WEIGHTED_HEALTH = "weighted_health"
+    STICKY = "sticky"
 
 
 class CatalogSelection(enum.StrEnum):
@@ -486,12 +487,21 @@ class Endpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     ip_allowlist: Mapped[list[str]] = mapped_column(JSON, default=list)
     secret_rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # A dedicated port is advertised as plain ip:port. When require_auth is false the
+    # gateway trusts ip_allowlist alone, so the API refuses an empty allowlist.
+    listen_port: Mapped[int | None] = mapped_column(Integer)
+    require_auth: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Overrides the pool's rotation mode for this endpoint only.
+    strategy: Mapped[PoolStrategy | None] = mapped_column(
+        enum_type(PoolStrategy, "endpoint_strategy")
+    )
 
     __table_args__ = (
         ForeignKeyConstraint(
             ["workspace_id", "pool_id"], ["pools.workspace_id", "pools.id"], ondelete="CASCADE"
         ),
         UniqueConstraint("workspace_id", "name", name="uq_endpoint_name"),
+        UniqueConstraint("listen_port", name="uq_endpoint_listen_port"),
         UniqueConstraint("workspace_id", "id", name="uq_endpoint_workspace_id"),
     )
 

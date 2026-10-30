@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.security import KeyRing, endpoint_hmac_key_bytes
 
 from .auth import EndpointAuthenticator
+from .listeners import ListenerManager
 from .server import GatewayConfig, GatewayServer
 from .snapshots import EncryptedSnapshotCodec, RedisSnapshotLoader, SnapshotStore
 from .socks5 import Socks5Config, Socks5Server
@@ -52,7 +53,15 @@ async def run_gateway() -> None:
         gateway=gateway,
         config=Socks5Config(host=settings.gateway_bind_host, port=settings.gateway_socks_bind_port),
     )
+    listeners = ListenerManager(
+        snapshots=snapshots,
+        gateway=gateway,
+        socks=socks,
+        host=settings.gateway_bind_host,
+        port_range=settings.listener_port_range,
+    )
     loader_task = asyncio.create_task(loader.run(), name="gateway-snapshot-loader")
+    listener_task = asyncio.create_task(listeners.run(), name="gateway-dedicated-listeners")
     telemetry_task = asyncio.create_task(telemetry.run(redis), name="gateway-telemetry")
     http_server = await gateway.start()
     socks_server = await socks.start()
@@ -62,9 +71,10 @@ async def run_gateway() -> None:
     finally:
         loader.stop()
         telemetry.stop()
+        await listeners.close()
         await gateway.close()
         await socks.close()
-        for task in (loader_task, telemetry_task):
+        for task in (loader_task, telemetry_task, listener_task):
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task

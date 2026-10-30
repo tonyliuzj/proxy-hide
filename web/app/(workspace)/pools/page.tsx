@@ -15,6 +15,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useResourceParams } from "@/hooks/use-resource-params";
 import { api, ApiError } from "@/lib/api/client";
+import { strategyLabel } from "@/lib/api/strategies";
 import { useFilters, usePools } from "@/lib/api/resources";
 import type { Pool } from "@/lib/api/types";
 import { formatRelativeTime } from "@/lib/utils";
@@ -58,7 +59,7 @@ export default function PoolsPage() {
         <Table><TableHeader><TableRow><TableHead className="pl-5">Pool</TableHead><TableHead>Filter</TableHead><TableHead>Catalog</TableHead><TableHead>Rotation</TableHead><TableHead>Revision</TableHead><TableHead>Members</TableHead><TableHead>Status</TableHead><TableHead>Materialised</TableHead><TableHead className="w-12" /></TableRow></TableHeader><TableBody>{rows.map((pool) => <TableRow key={pool.id}>
           <TableCell className="pl-5 font-medium">{pool.name}</TableCell>
           <TableCell>{filterNames.get(pool.filterName) ?? <span className="font-mono text-xs">{pool.filterName.slice(0, 8)}</span>}</TableCell>
-          <TableCell><Badge variant="outline" className="capitalize">{pool.catalogSelection}</Badge></TableCell><TableCell className="capitalize">{pool.strategy.replaceAll("_", " ")}</TableCell><TableCell className="font-mono text-xs">{pool.currentRevision || "Pending"}</TableCell>
+          <TableCell><Badge variant="outline" className="capitalize">{pool.catalogSelection}</Badge></TableCell><TableCell>{strategyLabel(pool.strategy)}</TableCell><TableCell className="font-mono text-xs">{pool.currentRevision || "Pending"}</TableCell>
           <TableCell>{pool.eligibleCount === null ? <span className="text-muted-foreground">Not reported</span> : <span className="font-semibold tabular-nums">{pool.eligibleCount}</span>}</TableCell><TableCell><StatusBadge status={!pool.enabled ? "disabled" : pool.currentRevision ? "healthy" : "queued"} /></TableCell><TableCell className="text-xs text-muted-foreground">{formatRelativeTime(pool.updatedAt)}</TableCell>
           <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`${pool.name} actions`}><MoreHorizontal /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => void materialize(pool)}><Play />Materialise now</DropdownMenuItem><DropdownMenuItem onSelect={() => void toggle(pool)}>{pool.enabled ? <PauseCircle /> : <PlayCircle />}{pool.enabled ? "Disable pool" : "Enable pool"}</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => void remove(pool)}><Trash2 />Delete pool</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>)}</TableBody></Table>

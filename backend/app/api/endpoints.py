@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import secrets
 from urllib.parse import quote
 from uuid import UUID
 
@@ -57,6 +58,45 @@ def _normalize_allowlist(values: list[str]) -> list[str]:
     return sorted(set(normalized))
 
 
+def _require_open_access_allowlist(allowlist: list[str]) -> None:
+    """An open port trusts the client address alone, so the allowlist must mean something."""
+    if not allowlist:
+        raise APIError(
+            422,
+            "OPEN_ACCESS_NEEDS_ALLOWLIST",
+            "A port without credentials needs a client IP allowlist, for example 192.168.0.0/16.",
+        )
+    if any(ipaddress.ip_network(value).prefixlen == 0 for value in allowlist):
+        raise APIError(
+            422,
+            "OPEN_ACCESS_TOO_BROAD",
+            "A port without credentials cannot allow every address. Narrow the allowlist "
+            "or require credentials.",
+        )
+
+
+async def _allocate_port(db: DB, requested: int | None) -> int:
+    window = get_settings().listener_port_range
+    if window is None:
+        raise APIError(422, "DEDICATED_PORTS_DISABLED", "Dedicated endpoint ports are disabled.")
+    low, high = window
+    taken = set(
+        (
+            await db.scalars(select(Endpoint.listen_port).where(Endpoint.listen_port.is_not(None)))
+        ).all()
+    )
+    if requested is not None:
+        if not low <= requested <= high:
+            raise APIError(422, "PORT_OUT_OF_RANGE", f"Choose a port between {low} and {high}.")
+        if requested in taken:
+            raise APIError(409, "PORT_IN_USE", f"Port {requested} is already used.")
+        return requested
+    free = next((port for port in range(low, high + 1) if port not in taken), None)
+    if free is None:
+        raise APIError(409, "NO_FREE_PORTS", "Every dedicated port is already in use.")
+    return free
+
+
 async def _tenant_pool(pool_id: UUID, db: DB, workspace_id: UUID) -> Pool:
     pool = await db.scalar(
         select(Pool).where(Pool.id == pool_id, Pool.workspace_id == workspace_id)
@@ -75,12 +115,15 @@ async def _tenant_endpoint(endpoint_id: UUID, db: DB, workspace_id: UUID) -> End
     return endpoint
 
 
-def _created_view(endpoint: Endpoint, secret: str) -> EndpointCreated:
+def _created_view(endpoint: Endpoint, secret: str | None) -> EndpointCreated:
     settings = get_settings()
+    fields = EndpointView.model_validate(endpoint).model_dump(exclude={"proxy_address"})
+    if secret is None:
+        return EndpointCreated(**fields)
     username = quote(endpoint.username, safe="")
     encoded_secret = quote(secret, safe="")
     return EndpointCreated(
-        **EndpointView.model_validate(endpoint).model_dump(),
+        **fields,
         secret=secret,
         plaintext_url=(
             f"http://{username}:{encoded_secret}@{settings.public_gateway_host}:"
@@ -136,16 +179,34 @@ async def create_endpoint(
         limit_field="max_endpoints",
     )
     await _tenant_pool(payload.pool_id, db, principal.workspace_id)
-    secret = generate_endpoint_secret()
+    allowlist = _normalize_allowlist(payload.ip_allowlist)
+    dedicated = payload.dedicated_port or payload.listen_port is not None
+    open_access = not payload.require_auth
+    if open_access:
+        if not dedicated:
+            raise APIError(
+                422,
+                "OPEN_ACCESS_NEEDS_PORT",
+                "Access without credentials needs a dedicated port.",
+            )
+        _require_open_access_allowlist(allowlist)
+    elif payload.username is None:
+        raise APIError(422, "USERNAME_REQUIRED", "A username is required when using credentials.")
+    listen_port = await _allocate_port(db, payload.listen_port) if dedicated else None
+    # An open endpoint is never issued a secret; the stored digest is of a value no one holds.
+    secret = None if open_access else generate_endpoint_secret()
     endpoint = Endpoint(
         workspace_id=principal.workspace_id,
         name=payload.name.strip(),
         pool_id=payload.pool_id,
-        username=payload.username,
-        secret_digest=digest_endpoint_secret(secret),
+        username=payload.username or f"open-{secrets.token_hex(4)}",
+        secret_digest=digest_endpoint_secret(secret or generate_endpoint_secret()),
         enabled=payload.enabled,
-        ip_allowlist=_normalize_allowlist(payload.ip_allowlist),
-        secret_rotated_at=utcnow(),
+        ip_allowlist=allowlist,
+        secret_rotated_at=None if open_access else utcnow(),
+        listen_port=listen_port,
+        require_auth=payload.require_auth,
+        strategy=payload.strategy,
     )
     db.add(endpoint)
     await db.flush()
@@ -157,7 +218,7 @@ async def create_endpoint(
         action="endpoint.created",
         resource_type="endpoint",
         resource_id=endpoint.id,
-        details={"username": endpoint.username},
+        details={"username": endpoint.username, "listen_port": endpoint.listen_port},
     )
     await db.commit()
     response.headers["Cache-Control"] = "no-store"
@@ -185,6 +246,23 @@ async def update_endpoint(
         await _tenant_pool(payload.pool_id, db, principal.workspace_id)
     if payload.ip_allowlist is not None:
         changes["ip_allowlist"] = _normalize_allowlist(payload.ip_allowlist)
+    require_auth = changes.get("require_auth", endpoint.require_auth)
+    if "require_auth" in changes and require_auth is None:
+        raise APIError(422, "REQUIRE_AUTH_INVALID", "require_auth must be true or false.")
+    if not require_auth:
+        if endpoint.listen_port is None:
+            raise APIError(
+                422,
+                "OPEN_ACCESS_NEEDS_PORT",
+                "Access without credentials needs a dedicated port.",
+            )
+        _require_open_access_allowlist(changes.get("ip_allowlist", endpoint.ip_allowlist))
+    elif endpoint.secret_rotated_at is None:
+        raise APIError(
+            422,
+            "SECRET_NOT_ISSUED",
+            "Regenerate the secret before requiring credentials on this endpoint.",
+        )
     for field, value in changes.items():
         setattr(endpoint, field, value.strip() if field == "name" else value)
     _enqueue_snapshot(db, principal.workspace_id, "endpoint_updated")

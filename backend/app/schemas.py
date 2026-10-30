@@ -4,8 +4,9 @@ from datetime import datetime
 from typing import Any, Literal, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, computed_field, field_validator
 
+from app.config import get_settings
 from app.models import (
     AlertSeverity,
     AlertStatus,
@@ -508,9 +509,15 @@ class PoolView(Schema):
 class EndpointCreate(Schema):
     name: str = Field(min_length=1, max_length=120)
     pool_id: UUID
-    username: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}$")
+    # Required unless the endpoint is an open dedicated port, which has no credentials.
+    username: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}$")
     enabled: bool = True
     ip_allowlist: list[str] = Field(default_factory=list, max_length=100)
+    # Advertise the endpoint as its own ip:port. Omit listen_port to take the next free one.
+    dedicated_port: bool = False
+    listen_port: int | None = Field(default=None, ge=1024, le=65535)
+    require_auth: bool = True
+    strategy: PoolStrategy | None = None
 
 
 class EndpointUpdate(Schema):
@@ -518,6 +525,9 @@ class EndpointUpdate(Schema):
     pool_id: UUID | None = None
     enabled: bool | None = None
     ip_allowlist: list[str] | None = Field(default=None, max_length=100)
+    require_auth: bool | None = None
+    # An explicit null clears the override so the endpoint follows its pool again.
+    strategy: PoolStrategy | None = None
 
 
 class EndpointView(Schema):
@@ -527,14 +537,25 @@ class EndpointView(Schema):
     username: str
     enabled: bool
     ip_allowlist: list[str]
+    listen_port: int | None = None
+    require_auth: bool = True
+    strategy: PoolStrategy | None = None
     secret_rotated_at: datetime | None
     created_at: datetime
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def proxy_address(self) -> str | None:
+        """The ip:port clients are given for a dedicated listener."""
+        if self.listen_port is None:
+            return None
+        return f"{get_settings().public_gateway_host}:{self.listen_port}"
+
 
 class EndpointCreated(EndpointView):
-    secret: str
-    plaintext_url: str
-    secure_url: str
+    secret: str | None = None
+    plaintext_url: str | None = None
+    secure_url: str | None = None
 
 
 class ConnectionGuideView(Schema):

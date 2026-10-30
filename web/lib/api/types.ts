@@ -119,7 +119,7 @@ export interface ProxyFilter {
   rules?: Record<string, unknown>;
 }
 
-export type RotationStrategy = "random" | "round_robin" | "lowest_latency" | "weighted_health";
+export type RotationStrategy = "random" | "round_robin" | "lowest_latency" | "weighted_health" | "sticky";
 
 export interface Pool {
   id: string;
@@ -143,6 +143,10 @@ export interface Endpoint {
   poolName: string;
   enabled: boolean;
   ipAllowlist: string[];
+  listenPort: number | null;
+  proxyAddress: string | null;
+  requireAuth: boolean;
+  strategy: RotationStrategy | null;
   requests24h: number | null;
   successRate: number | null;
   lastUsedAt?: string;
@@ -150,9 +154,10 @@ export interface Endpoint {
 }
 
 export interface EndpointCredentials extends Endpoint {
-  secret: string;
-  plaintextUrl: string;
-  secureUrl: string;
+  // Null for an open dedicated port, which is never issued a secret.
+  secret: string | null;
+  plaintextUrl: string | null;
+  secureUrl: string | null;
 }
 
 export interface CheckRun {

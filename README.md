@@ -36,6 +36,32 @@ remains available to replace an administrator password from the host.
 Use `make logs` to follow the combined backend and web logs, and `make down` to
 stop the installation.
 
+## Endpoints: how other apps connect
+
+An endpoint maps a way of connecting to a pool, and the pool's filter decides which
+tested proxies can be used. There are two kinds:
+
+- **Dedicated `ip:port`** (default for new endpoints in the console). The endpoint gets
+  its own port from `GATEWAY_LISTENER_PORTS`, and clients just use `host:port` as an
+  HTTP, HTTPS-via-CONNECT, or SOCKS5 proxy with no username or password. Because there
+  are no credentials, the endpoint must have a client IP allowlist, and one that allows
+  every address (`0.0.0.0/0`) is refused. Use your LAN or Docker network range, for
+  example `192.168.0.0/16`.
+- **Credentials** on the shared ports (`9000` HTTP, `1080` SOCKS5). A username and
+  one-time secret select the endpoint. This is also available on a dedicated port.
+
+Rotation is chosen per endpoint, or inherited from the pool:
+
+| Mode | Behavior |
+| --- | --- |
+| By list (`round_robin`) | Next proxy in list order on every connection, skipping failed ones |
+| Random (`random`) | A random healthy proxy per connection |
+| Fastest (`lowest_latency`) | The lowest-latency healthy proxy, falling back down the list |
+| Best quality (`weighted_health`) | Random, weighted towards higher health scores |
+| No rotation (`sticky`) | Stay on one proxy until it fails, then move to the next and stay there |
+
+Within one connection the gateway tries up to three proxies before giving up, in every mode.
+
 ## Docker Hub images
 
 Only two project images are needed. Both are published in the private

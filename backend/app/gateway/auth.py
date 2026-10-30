@@ -45,6 +45,32 @@ class EndpointAuthenticator:
             raise Forbidden("source IP is not allowed")
         return AuthenticatedEndpoint(endpoint)
 
+    def authenticate_listener(
+        self,
+        snapshot: GatewaySnapshot,
+        port: int,
+        proxy_authorization: bytes | str | None,
+        client_ip: str,
+    ) -> AuthenticatedEndpoint:
+        """Authenticate a client of a dedicated ``ip:port`` listener.
+
+        An open listener trusts the client address alone, so an empty allowlist
+        is refused instead of being treated as "any address".
+        """
+        endpoint = snapshot.listeners.get(port)
+        if endpoint is None:
+            raise PoolUnavailable("no endpoint is bound to this port")
+        if endpoint.require_auth:
+            authenticated = self.authenticate(snapshot, proxy_authorization, client_ip)
+            if authenticated.endpoint.id != endpoint.id:
+                raise ProxyAuthenticationRequired("invalid endpoint credentials")
+            return authenticated
+        if not endpoint.enabled or not endpoint.workspace_enabled:
+            raise PoolUnavailable("endpoint or workspace is disabled")
+        if not endpoint.ip_allowlist or not endpoint.allows_ip(client_ip):
+            raise Forbidden("source IP is not allowed")
+        return AuthenticatedEndpoint(endpoint)
+
     def authenticate_credentials(
         self, snapshot: GatewaySnapshot, username: str, password: str, client_ip: str
     ) -> AuthenticatedEndpoint:

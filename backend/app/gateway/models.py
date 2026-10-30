@@ -26,6 +26,7 @@ class PoolStrategy(StrEnum):
     ROUND_ROBIN = "round_robin"
     LOWEST_LATENCY = "lowest_latency"
     WEIGHTED_HEALTH = "weighted_health"
+    STICKY = "sticky"
 
 
 def _secret(value: object) -> str | None:
@@ -115,6 +116,9 @@ class EndpointSnapshot:
     destination_ports: frozenset[int] = frozenset({80, 443})
     requests_per_minute: int = 600
     max_connections: int = 100
+    listen_port: int | None = None
+    require_auth: bool = True
+    strategy: PoolStrategy | None = None
 
     @classmethod
     def from_dict(cls, username: str, data: Mapping[str, Any]) -> EndpointSnapshot:
@@ -122,6 +126,8 @@ class EndpointSnapshot:
             ipaddress.ip_network(str(item), strict=False) for item in data.get("ip_allowlist", ())
         )
         ports = frozenset(int(item) for item in data.get("destination_ports", (80, 443)))
+        listen_port = data.get("listen_port")
+        strategy = data.get("strategy")
         return cls(
             id=str(data["id"]),
             workspace_id=str(data["workspace_id"]),
@@ -139,6 +145,9 @@ class EndpointSnapshot:
                 1,
                 int(data.get("max_connections", data.get("max_gateway_connections", 100))),
             ),
+            listen_port=int(listen_port) if listen_port is not None else None,
+            require_auth=bool(data.get("require_auth", True)),
+            strategy=PoolStrategy(str(strategy)) if strategy else None,
         )
 
     def allows_ip(self, value: str) -> bool:
@@ -158,6 +167,9 @@ class GatewaySnapshot:
     endpoints: Mapping[str, EndpointSnapshot]
     pools: Mapping[str, PoolSnapshot]
     loaded_monotonic: float = field(default=0.0, compare=False)
+    listeners: Mapping[int, EndpointSnapshot] = field(
+        default_factory=lambda: MappingProxyType({}), compare=False
+    )
 
     @classmethod
     def from_dict(
@@ -181,12 +193,18 @@ class GatewaySnapshot:
             str(key): EndpointSnapshot.from_dict(str(key), value)
             for key, value in data.get("endpoints", {}).items()
         }
+        listeners = {
+            endpoint.listen_port: endpoint
+            for endpoint in endpoints.values()
+            if endpoint.listen_port is not None
+        }
         return cls(
             version=int(data.get("version", 0)),
             generated_at=generated_at,
             endpoints=MappingProxyType(endpoints),
             pools=MappingProxyType(pools),
             loaded_monotonic=float(loaded_monotonic),
+            listeners=MappingProxyType(listeners),
         )
 
     @classmethod

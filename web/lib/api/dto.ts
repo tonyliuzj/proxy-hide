@@ -146,14 +146,18 @@ export interface EndpointDto {
   username: string;
   enabled: boolean;
   ip_allowlist: string[];
+  listen_port: number | null;
+  proxy_address: string | null;
+  require_auth: boolean;
+  strategy: RotationStrategy | null;
   secret_rotated_at: string | null;
   created_at: string;
 }
 
 export interface EndpointCreatedDto extends EndpointDto {
-  secret: string;
-  plaintext_url: string;
-  secure_url: string;
+  secret: string | null;
+  plaintext_url: string | null;
+  secure_url: string | null;
 }
 
 export interface JobDto {

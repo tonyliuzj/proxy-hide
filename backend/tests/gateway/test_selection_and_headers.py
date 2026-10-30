@@ -65,3 +65,42 @@ def test_request_smuggling_headers_are_rejected() -> None:
             [(b"Host", b"example"), (b"Transfer-Encoding", b"chunked"), (b"Content-Length", b"3")],
             authority="example",
         )
+
+
+@pytest.mark.asyncio
+async def test_sticky_stays_on_one_route_until_it_is_quarantined() -> None:
+    quarantine = QuarantineRegistry(cooldown_seconds=60)
+    selector = CandidateSelector(quarantine, rng=random.Random(3))
+    pool = PoolSnapshot("pool", 1, PoolStrategy.STICKY, routes())
+
+    first = (await selector.select(pool, limit=1))[0].id
+    assert first == "slow"  # first route in pool order
+    assert [(await selector.select(pool, limit=1))[0].id for _ in range(5)] == [first] * 5
+
+    quarantine.fail(first)
+    moved = (await selector.select(pool, limit=1))[0].id
+    assert moved != first
+    quarantine.succeed(first)  # recovery does not win the pin back
+    assert (await selector.select(pool, limit=1))[0].id == moved
+
+
+@pytest.mark.asyncio
+async def test_sticky_offers_fallbacks_for_the_same_request() -> None:
+    selector = CandidateSelector(rng=random.Random(4))
+    pool = PoolSnapshot("pool", 1, PoolStrategy.STICKY, routes())
+    selected = await selector.select(pool, limit=3)
+    assert [item.id for item in selected] == ["slow", "fast", "unknown"]
+
+
+@pytest.mark.asyncio
+async def test_endpoint_strategy_overrides_the_pool_and_keeps_separate_state() -> None:
+    selector = CandidateSelector(rng=random.Random(5))
+    pool = PoolSnapshot("pool", 1, PoolStrategy.RANDOM, routes())
+
+    fastest = await selector.select(pool, limit=1, strategy=PoolStrategy.LOWEST_LATENCY)
+    assert fastest[0].id == "fast"
+
+    kwargs = {"limit": 1, "strategy": PoolStrategy.ROUND_ROBIN}
+    a = [(await selector.select(pool, scope="pool:a", **kwargs))[0].id for _ in range(2)]  # type: ignore[arg-type]
+    b = [(await selector.select(pool, scope="pool:b", **kwargs))[0].id for _ in range(2)]  # type: ignore[arg-type]
+    assert a == b == ["slow", "fast"]

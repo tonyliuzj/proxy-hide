@@ -43,16 +43,33 @@ class CandidateSelector:
         self.quarantine = quarantine or QuarantineRegistry()
         self._rng = rng or random.SystemRandom()
         self._round_robin: dict[str, int] = defaultdict(int)
+        self._sticky: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
-    async def select(self, pool: PoolSnapshot, *, limit: int = 3) -> tuple[UpstreamRoute, ...]:
+    async def select(
+        self,
+        pool: PoolSnapshot,
+        *,
+        limit: int = 3,
+        strategy: PoolStrategy | None = None,
+        scope: str | None = None,
+    ) -> tuple[UpstreamRoute, ...]:
+        """Order candidate routes for one connection attempt.
+
+        ``strategy`` overrides the pool's rotation mode. ``scope`` keys the round-robin
+        and sticky state so endpoints sharing a pool do not disturb each other.
+        """
         routes = [route for route in pool.routes if self.quarantine.available(route.id)]
         if not routes:
             return ()
         count = min(max(1, limit), len(routes))
-        if pool.strategy is PoolStrategy.RANDOM:
+        mode = strategy or pool.strategy
+        state_key = scope or pool.id
+        if mode is PoolStrategy.RANDOM:
             return tuple(self._rng.sample(routes, count))
-        if pool.strategy is PoolStrategy.LOWEST_LATENCY:
+        if mode is PoolStrategy.STICKY:
+            return await self._sticky_choice(state_key, routes, count)
+        if mode is PoolStrategy.LOWEST_LATENCY:
             return tuple(
                 sorted(
                     routes,
@@ -63,13 +80,30 @@ class CandidateSelector:
                     ),
                 )[:count]
             )
-        if pool.strategy is PoolStrategy.WEIGHTED_HEALTH:
+        if mode is PoolStrategy.WEIGHTED_HEALTH:
             return tuple(self._weighted_without_replacement(routes, count))
         async with self._lock:
-            start = self._round_robin[pool.id] % len(routes)
-            self._round_robin[pool.id] = (start + 1) % len(routes)
+            start = self._round_robin[state_key] % len(routes)
+            self._round_robin[state_key] = (start + 1) % len(routes)
         ordered = routes[start:] + routes[:start]
         return tuple(ordered[:count])
+
+    async def _sticky_choice(
+        self, state_key: str, routes: list[UpstreamRoute], count: int
+    ) -> tuple[UpstreamRoute, ...]:
+        """Stay on one route until it is quarantined or leaves the pool, then re-pin.
+
+        A route that recovers does not win the pin back; "no rotation" means the
+        exit address only changes when the current one stops working.
+        """
+        async with self._lock:
+            pinned = self._sticky.get(state_key)
+            current = next((route for route in routes if route.id == pinned), None)
+            if current is None:
+                current = routes[0]
+                self._sticky[state_key] = current.id
+        fallbacks = [route for route in routes if route.id != current.id]
+        return (current, *fallbacks[: count - 1])
 
     def _weighted_without_replacement(
         self, routes: list[UpstreamRoute], count: int

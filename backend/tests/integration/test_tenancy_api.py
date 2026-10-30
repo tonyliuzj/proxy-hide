@@ -328,3 +328,130 @@ async def test_manual_check_hides_global_proxy_when_catalog_is_disabled(
 
     assert response.status_code == 404, response.text
     assert response.json()["error"]["code"] == "PROXY_NOT_FOUND"
+
+
+async def _create_endpoint(
+    client: AsyncClient, csrf: str, pool_id: UUID, **overrides: object
+) -> tuple[int, dict]:
+    body = {"name": "Endpoint", "pool_id": str(pool_id), **overrides}
+    response = await client.post("/api/v1/endpoints", json=body, headers={"X-CSRF-Token": csrf})
+    return response.status_code, response.json()
+
+
+async def test_open_dedicated_endpoint_is_advertised_as_ip_port_without_a_secret(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    csrf = await _login(client)
+
+    status, created = await _create_endpoint(
+        client,
+        csrf,
+        seeded.pool_id,
+        dedicated_port=True,
+        require_auth=False,
+        ip_allowlist=["192.168.0.0/16"],
+        strategy="sticky",
+    )
+
+    assert status == 201, created
+    assert 10000 <= created["listen_port"] <= 10019
+    assert created["proxy_address"].endswith(f":{created['listen_port']}")
+    assert created["require_auth"] is False
+    assert created["strategy"] == "sticky"
+    assert created["username"].startswith("open-")
+    assert created["secret"] is None and created["plaintext_url"] is None
+
+
+async def test_open_access_is_refused_without_a_narrow_allowlist_or_a_port(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    csrf = await _login(client)
+    open_port = {"dedicated_port": True, "require_auth": False}
+
+    status, error = await _create_endpoint(client, csrf, seeded.pool_id, **open_port)
+    assert (status, error["error"]["code"]) == (422, "OPEN_ACCESS_NEEDS_ALLOWLIST")
+
+    status, error = await _create_endpoint(
+        client, csrf, seeded.pool_id, ip_allowlist=["0.0.0.0/0"], **open_port
+    )
+    assert (status, error["error"]["code"]) == (422, "OPEN_ACCESS_TOO_BROAD")
+
+    status, error = await _create_endpoint(
+        client, csrf, seeded.pool_id, require_auth=False, ip_allowlist=["10.0.0.0/8"]
+    )
+    assert (status, error["error"]["code"]) == (422, "OPEN_ACCESS_NEEDS_PORT")
+
+    status, error = await _create_endpoint(client, csrf, seeded.pool_id)
+    assert (status, error["error"]["code"]) == (422, "USERNAME_REQUIRED")
+
+
+async def test_dedicated_ports_are_allocated_uniquely_and_validated(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    csrf = await _login(client)
+    open_port = {"require_auth": False, "ip_allowlist": ["10.0.0.0/8"]}
+
+    _, first = await _create_endpoint(
+        client, csrf, seeded.pool_id, name="a", dedicated_port=True, **open_port
+    )
+    _, second = await _create_endpoint(
+        client, csrf, seeded.pool_id, name="b", dedicated_port=True, **open_port
+    )
+    assert first["listen_port"] != second["listen_port"]
+
+    status, error = await _create_endpoint(
+        client, csrf, seeded.pool_id, name="c", listen_port=first["listen_port"], **open_port
+    )
+    assert (status, error["error"]["code"]) == (409, "PORT_IN_USE")
+
+    status, error = await _create_endpoint(
+        client, csrf, seeded.pool_id, name="d", listen_port=22000, **open_port
+    )
+    assert (status, error["error"]["code"]) == (422, "PORT_OUT_OF_RANGE")
+
+
+async def test_endpoint_rotation_override_can_be_set_and_cleared(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    csrf = await _login(client)
+    headers = {"X-CSRF-Token": csrf}
+    _, created = await _create_endpoint(
+        client, csrf, seeded.pool_id, username="rotating-one", strategy="lowest_latency"
+    )
+    url = f"/api/v1/endpoints/{created['id']}"
+
+    cleared = await client.patch(url, json={"strategy": None}, headers=headers)
+    assert cleared.status_code == 200 and cleared.json()["strategy"] is None
+
+    untouched = await client.patch(url, json={"enabled": False}, headers=headers)
+    assert untouched.status_code == 200 and untouched.json()["strategy"] is None
+
+
+async def test_open_endpoint_cannot_require_credentials_until_a_secret_is_issued(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    csrf = await _login(client)
+    headers = {"X-CSRF-Token": csrf}
+    _, created = await _create_endpoint(
+        client,
+        csrf,
+        seeded.pool_id,
+        dedicated_port=True,
+        require_auth=False,
+        ip_allowlist=["10.0.0.0/8"],
+    )
+    url = f"/api/v1/endpoints/{created['id']}"
+
+    refused = await client.patch(url, json={"require_auth": True}, headers=headers)
+    assert refused.status_code == 422
+    assert refused.json()["error"]["code"] == "SECRET_NOT_ISSUED"
+
+    issued = await client.post(f"{url}/regenerate-secret", headers=headers)
+    assert issued.status_code == 200 and issued.json()["secret"]
+    allowed = await client.patch(url, json={"require_auth": True}, headers=headers)
+    assert allowed.status_code == 200 and allowed.json()["require_auth"] is True

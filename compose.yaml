@@ -39,12 +39,15 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://proxyhide:proxyhide-dev@postgres:5432/proxyhide}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       GEOIP_DATABASE_PATH: ${GEOIP_DATABASE_PATH:-/data/geoip/GeoLite2-City.mmdb}
+      GATEWAY_LISTENER_PORTS: ${GATEWAY_LISTENER_PORTS:-10000-10019}
     volumes:
       - ./geoip:/data/geoip:ro
     ports:
       - "8000:8000"
       - "9000:9000"
       - "${GATEWAY_SOCKS_PORT:-1080}:1080"
+      # Dedicated ip:port endpoints. The same range is bound inside and published outside.
+      - "${GATEWAY_LISTENER_PORTS:-10000-10019}:${GATEWAY_LISTENER_PORTS:-10000-10019}"
     depends_on:
       postgres:
         condition: service_healthy

@@ -107,8 +107,20 @@ class GatewayServer:
             await self._server.wait_closed()
 
     async def handle_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        *,
+        listener_port: int | None = None,
+        client_ip: str | None = None,
+        prefix: bytes = b"",
     ) -> None:
+        """Serve one HTTP proxy connection.
+
+        ``listener_port`` marks a dedicated per-endpoint port. The listener manager
+        resolves ``client_ip`` and sniffs the protocol first, handing the consumed
+        bytes back through ``prefix``.
+        """
         connection = h11.Connection(
             h11.SERVER, max_incomplete_event_size=self.config.max_header_bytes
         )
@@ -117,13 +129,22 @@ class GatewayServer:
         stats = RequestStats()
         outcome = "internal_error"
         try:
-            client_ip = await self._client_ip(reader, writer)
+            if client_ip is None:
+                client_ip = await self._client_ip(reader, writer)
+            if prefix:
+                connection.receive_data(prefix)
             request = await self._read_request(connection, reader)
             authorization = first_header(request.headers, b"proxy-authorization")
-            if decode_basic_credentials(authorization) is None:
-                raise ProxyAuthenticationRequired("missing or invalid Proxy-Authorization")
-            snapshot = self.snapshots.current()
-            authenticated = self.authenticator.authenticate(snapshot, authorization, client_ip)
+            if listener_port is None:
+                if decode_basic_credentials(authorization) is None:
+                    raise ProxyAuthenticationRequired("missing or invalid Proxy-Authorization")
+                snapshot = self.snapshots.current()
+                authenticated = self.authenticator.authenticate(snapshot, authorization, client_ip)
+            else:
+                snapshot = self.snapshots.current()
+                authenticated = self.authenticator.authenticate_listener(
+                    snapshot, listener_port, authorization, client_ip
+                )
             endpoint = authenticated.endpoint
             pool = snapshot.pools.get(endpoint.pool_id)
             if pool is None or not pool.routes:
@@ -230,7 +251,9 @@ class GatewayServer:
             if port not in endpoint.destination_ports:
                 raise DestinationDenied("destination port is not allowed")
             destination = await self.connector.resolve_destination(host, port)
-            connected = await self._connect_with_failover(pool, destination, tunnel=True)
+            connected = await self._connect_with_failover(
+                pool, destination, tunnel=True, endpoint=endpoint
+            )
             stats.route_id = connected.route.id
             self.selector.quarantine.succeed(connected.route.id)
             await self._send_h11(
@@ -258,7 +281,9 @@ class GatewayServer:
         ):
             raise BadRequest("Host header does not match request target")
         destination = await self.connector.resolve_destination(host, port)
-        connected = await self._connect_with_failover(pool, destination, tunnel=False)
+        connected = await self._connect_with_failover(
+            pool, destination, tunnel=False, endpoint=endpoint
+        )
         stats.route_id = connected.route.id
         self.selector.quarantine.succeed(connected.route.id)
         try:
@@ -281,8 +306,14 @@ class GatewayServer:
         destination: PinnedDestination,
         *,
         tunnel: bool,
+        endpoint: EndpointSnapshot | None = None,
     ) -> ConnectedUpstream:
-        candidates = await self.selector.select(pool, limit=self.config.max_attempts)
+        candidates = await self.selector.select(
+            pool,
+            limit=self.config.max_attempts,
+            strategy=endpoint.strategy if endpoint else None,
+            scope=f"{pool.id}:{endpoint.id}" if endpoint else None,
+        )
         if not candidates:
             raise PoolUnavailable("all pool routes are temporarily unavailable")
         last_error: BaseException | None = None

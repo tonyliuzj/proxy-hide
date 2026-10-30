@@ -26,9 +26,11 @@ test("workspace owner imports proxies and publishes one-time endpoint credential
   await page.goto("/endpoints");
   await page.getByRole("button", { name: "Publish endpoint" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Google UK customer");
-  await page.getByLabel("Gateway username").fill("google-uk-customer");
-  await page.getByRole("combobox").click();
+  await page.getByRole("combobox").nth(0).click();
   await page.getByRole("option").first().click();
+  await page.getByRole("combobox").nth(1).click();
+  await page.getByRole("option", { name: /username and secret/ }).click();
+  await page.getByLabel("Gateway username").fill("google-uk-customer");
   await page.getByRole("button", { name: "Publish endpoint" }).last().click();
   await expect(page.getByRole("heading", { name: "Endpoint credentials" })).toBeVisible();
   await expect(page.getByText(/https:\/\/google-uk-customer:/)).toBeVisible();

@@ -33,6 +33,22 @@ The database serializes concurrent attempts, and setup closes as soon as any
 user exists. Later administrator password recovery remains available through
 the host-only `make admin` command.
 
+## Dedicated endpoint ports
+
+Dedicated ports (`GATEWAY_LISTENER_PORTS`, default `10000-10019`) are opened and closed
+by the gateway as endpoints are published and deleted; no restart is needed. Compose
+publishes the whole range, so narrow it to what you use.
+
+A port without credentials trusts the client address alone. Its allowlist is mandatory,
+`/0` allowlists are rejected, and a gateway that somehow holds an open endpoint with an
+empty allowlist rejects every client. Behind Docker's userland proxy or NAT the gateway
+sees the translated source address, so allow that address (often the Docker bridge
+gateway) rather than the original client when you connect from outside the container
+network. Do not forward these ports to the public internet.
+
+Deleting an endpoint closes its listening socket immediately; connections already open
+finish normally, as with credential changes.
+
 ## Failure behavior
 
 - PostgreSQL is the authoritative source for workspaces, endpoint credentials,

@@ -144,6 +144,9 @@ class SnapshotPublisher:
                     "destination_ports": limits.destination_ports,
                     "requests_per_minute": limits.requests_per_minute,
                     "max_connections": limits.max_gateway_connections,
+                    "listen_port": endpoint.listen_port,
+                    "require_auth": endpoint.require_auth,
+                    "strategy": endpoint.strategy.value if endpoint.strategy else None,
                 }
                 pool_key = str(pool.id)
                 if pool_key not in pools:

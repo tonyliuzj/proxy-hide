@@ -7,6 +7,19 @@ from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def parse_port_range(value: str) -> tuple[int, int]:
+    first, _, last = value.strip().partition("-")
+    try:
+        low, high = int(first), int(last or first)
+    except ValueError as exc:
+        raise ValueError("listener ports must look like 10000-10019") from exc
+    if not 1024 <= low <= high <= 65535:
+        raise ValueError("listener ports must be an ascending range within 1024-65535")
+    if high - low >= 1000:
+        raise ValueError("listener ports may span at most 1000 ports")
+    return low, high
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="PH_",
@@ -79,6 +92,10 @@ class Settings(BaseSettings):
         default=1080,
         validation_alias=AliasChoices("PH_GATEWAY_SOCKS_PORT", "GATEWAY_SOCKS_PORT"),
     )
+    gateway_listener_ports: str = Field(
+        default="10000-10019",
+        validation_alias=AliasChoices("PH_GATEWAY_LISTENER_PORTS", "GATEWAY_LISTENER_PORTS"),
+    )
     trusted_proxy_cidrs: list[str] = Field(
         default_factory=list,
         validation_alias=AliasChoices("PH_TRUSTED_PROXY_CIDRS", "TRUSTED_PROXY_CIDRS"),
@@ -112,6 +129,21 @@ class Settings(BaseSettings):
             raise ValueError("database_url must use an async SQLAlchemy driver")
         return value
 
+    @field_validator("gateway_listener_ports")
+    @classmethod
+    def validate_listener_ports(cls, value: str) -> str:
+        value = value.strip()
+        if value:
+            parse_port_range(value)
+        return value
+
+    @property
+    def listener_port_range(self) -> tuple[int, int] | None:
+        """Inclusive range for dedicated endpoint ports; ``None`` disables them."""
+        if not self.gateway_listener_ports:
+            return None
+        return parse_port_range(self.gateway_listener_ports)
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def split_origins(cls, value: object) -> object:
@@ -125,6 +157,15 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return [part.strip() for part in value.split(",") if part.strip()]
         return value
+
+    @model_validator(mode="after")
+    def keep_listener_ports_off_shared_ports(self) -> Settings:
+        window = self.listener_port_range
+        if window is not None:
+            shared = {self.gateway_bind_port, self.gateway_socks_bind_port, 8000}
+            if any(window[0] <= port <= window[1] for port in shared):
+                raise ValueError("gateway listener ports must not include the shared gateway ports")
+        return self
 
     @model_validator(mode="after")
     def reject_development_secrets_in_production(self) -> Settings:

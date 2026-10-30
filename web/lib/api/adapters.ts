@@ -75,7 +75,7 @@ export function adaptPool(dto: PoolDto): Pool {
 }
 
 export function adaptEndpoint(dto: EndpointDto): Endpoint {
-  return { id: dto.id, name: dto.name, username: dto.username, poolName: dto.pool_id, enabled: dto.enabled, ipAllowlist: dto.ip_allowlist, requests24h: null, successRate: null, createdAt: dto.created_at, lastUsedAt: dto.secret_rotated_at ?? undefined };
+  return { id: dto.id, name: dto.name, username: dto.username, poolName: dto.pool_id, enabled: dto.enabled, ipAllowlist: dto.ip_allowlist, listenPort: dto.listen_port, proxyAddress: dto.proxy_address, requireAuth: dto.require_auth, strategy: dto.strategy, requests24h: null, successRate: null, createdAt: dto.created_at, lastUsedAt: dto.secret_rotated_at ?? undefined };
 }
 
 export function adaptEndpointCredentials(dto: EndpointCreatedDto): EndpointCredentials {

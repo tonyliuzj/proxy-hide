@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import ipaddress
 import logging
@@ -54,14 +55,22 @@ class Socks5Server:
             await self._server.wait_closed()
 
     async def handle_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        *,
+        listener_port: int | None = None,
+        client_ip: str | None = None,
+        prefix: bytes = b"",
     ) -> None:
         endpoint = None
         pool = None
         stats = RequestStats()
         outcome = "internal_error"
         try:
-            endpoint, client_ip, host, port = await self._negotiate(reader, writer)
+            endpoint, client_ip, host, port = await self._negotiate(
+                reader, writer, listener_port, client_ip, prefix
+            )
             if port not in endpoint.destination_ports:
                 raise PoolUnavailable("destination port is not allowed")
             pool = self.snapshots.current().pools.get(endpoint.pool_id)
@@ -74,7 +83,7 @@ class Socks5Server:
             destination = await self.gateway.connector.resolve_destination(host, port)
             async with self.gateway.connection_limiter.acquire(client_ip, endpoint):
                 connected = await self.gateway._connect_with_failover(
-                    pool, destination, tunnel=True
+                    pool, destination, tunnel=True, endpoint=endpoint
                 )
                 stats.route_id = connected.route.id
                 self.gateway.selector.quarantine.succeed(connected.route.id)
@@ -108,31 +117,61 @@ class Socks5Server:
                 await writer.wait_closed()
 
     async def _negotiate(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        listener_port: int | None = None,
+        client_ip: str | None = None,
+        prefix: bytes = b"",
     ) -> tuple[EndpointSnapshot, str, str, int]:
         async with asyncio.timeout(self.config.handshake_timeout):
-            version, methods = await self._greeting(reader)
-            if version != 5 or 2 not in methods:
+            version, methods = await self._greeting(reader, prefix)
+            if client_ip is None:
+                peer = writer.get_extra_info("peername")
+                client_ip = str(peer[0]) if peer else ""
+            if version != 5:
                 writer.write(b"\x05\xff")
                 await writer.drain()
-                raise ValueError("username/password authentication is required")
-            writer.write(b"\x05\x02")
-            await writer.drain()
-            username, password = await self._credentials(reader)
-            peer = writer.get_extra_info("peername")
-            client_ip = str(peer[0]) if peer else ""
-            endpoint = self.authenticator.authenticate_credentials(
-                self.snapshots.current(), username, password, client_ip
-            ).endpoint
-            writer.write(b"\x01\x00")
-            await writer.drain()
+                raise ValueError("unsupported SOCKS version")
+            snapshot = self.snapshots.current()
+            listener = snapshot.listeners.get(listener_port) if listener_port else None
+            if listener is not None and not listener.require_auth:
+                # Open dedicated port: the client address is the only credential.
+                if 0 not in methods:
+                    writer.write(b"\x05\xff")
+                    await writer.drain()
+                    raise ValueError("this listener requires no authentication")
+                endpoint = self.authenticator.authenticate_listener(
+                    snapshot, listener_port or 0, None, client_ip
+                ).endpoint
+                writer.write(b"\x05\x00")
+                await writer.drain()
+            else:
+                if 2 not in methods:
+                    writer.write(b"\x05\xff")
+                    await writer.drain()
+                    raise ValueError("username/password authentication is required")
+                writer.write(b"\x05\x02")
+                await writer.drain()
+                username, password = await self._credentials(reader)
+                if listener_port is None:
+                    endpoint = self.authenticator.authenticate_credentials(
+                        snapshot, username, password, client_ip
+                    ).endpoint
+                else:
+                    token = base64.b64encode(f"{username}:{password}".encode()).decode("ascii")
+                    endpoint = self.authenticator.authenticate_listener(
+                        snapshot, listener_port, f"Basic {token}", client_ip
+                    ).endpoint
+                writer.write(b"\x01\x00")
+                await writer.drain()
             host, port = await self._request(reader)
             return endpoint, client_ip, host, port
 
     @staticmethod
-    async def _greeting(reader: asyncio.StreamReader) -> tuple[int, bytes]:
-        version, count = await reader.readexactly(2)
-        return version, await reader.readexactly(count)
+    async def _greeting(reader: asyncio.StreamReader, prefix: bytes = b"") -> tuple[int, bytes]:
+        head = prefix + await reader.readexactly(2 - len(prefix))
+        return head[0], await reader.readexactly(head[1])
 
     @staticmethod
     async def _credentials(reader: asyncio.StreamReader) -> tuple[str, str]:

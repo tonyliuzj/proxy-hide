@@ -506,6 +506,26 @@ class PoolView(Schema):
     created_at: datetime
 
 
+class PoolListLinkCreate(Schema):
+    name: str = Field(min_length=1, max_length=120)
+    include_global: bool = False
+
+
+class PoolListLinkView(Schema):
+    id: UUID
+    pool_id: UUID
+    name: str
+    token_prefix: str
+    include_global: bool
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+class PoolListLinkCreated(PoolListLinkView):
+    # The full URL embeds the secret token and is only ever returned here.
+    url: str
+
+
 class EndpointCreate(Schema):
     name: str = Field(min_length=1, max_length=120)
     pool_id: UUID

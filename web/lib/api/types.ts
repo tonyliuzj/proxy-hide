@@ -136,6 +136,16 @@ export interface Pool {
   materializedAt?: string;
 }
 
+export interface PoolListLink {
+  id: string;
+  poolId: string;
+  name: string;
+  tokenPrefix: string;
+  includeGlobal: boolean;
+  lastUsedAt?: string;
+  createdAt: string;
+}
+
 export interface Endpoint {
   id: string;
   name: string;

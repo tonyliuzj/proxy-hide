@@ -1,9 +1,9 @@
 "use client";
 
-import { adaptAdminWorkspace, adaptDashboardSummary, adaptEndpoint, adaptFilter, adaptJob, adaptPage, adaptPool, adaptProxy, adaptSource, adaptTarget, adaptTrafficSummary, adaptWorkspaceSettings } from "@/lib/api/adapters";
-import type { AdminQueueStatisticsDto, DashboardSummaryDto, EndpointDto, FilterDto, JobDto, PageDto, PoolDto, ProxyDto, SourceDto, TargetDto, TrafficSummaryDto, WorkspaceAdminDto, WorkspaceSettingsDto } from "@/lib/api/dto";
+import { adaptAdminWorkspace, adaptDashboardSummary, adaptEndpoint, adaptFilter, adaptJob, adaptPage, adaptPool, adaptPoolListLink, adaptProxy, adaptSource, adaptTarget, adaptTrafficSummary, adaptWorkspaceSettings } from "@/lib/api/adapters";
+import type { AdminQueueStatisticsDto, DashboardSummaryDto, EndpointDto, FilterDto, JobDto, PageDto, PoolDto, PoolListLinkDto, ProxyDto, SourceDto, TargetDto, TrafficSummaryDto, WorkspaceAdminDto, WorkspaceSettingsDto } from "@/lib/api/dto";
 import { useApiQuery } from "@/lib/api/hooks";
-import type { AdminQueueStatistics, AdminWorkspace, DashboardSummary, Endpoint, JobRun, ListResponse, Pool, ProxyFilter, ProxyRecord, Source, Target, TrafficSummary, WorkspaceSettings } from "@/lib/api/types";
+import type { AdminQueueStatistics, AdminWorkspace, DashboardSummary, Endpoint, JobRun, ListResponse, Pool, PoolListLink, ProxyFilter, ProxyRecord, Source, Target, TrafficSummary, WorkspaceSettings } from "@/lib/api/types";
 import { buildQuery } from "@/lib/api/client";
 
 type Params = Record<string, string | number | boolean | undefined>;
@@ -13,6 +13,7 @@ export const useSources = (params: Params = {}) => useApiQuery<ListResponse<Sour
 export const useTargets = (params: Params = {}) => useApiQuery<ListResponse<Target>, PageDto<TargetDto>>(["targets", params], `/targets${buildQuery(params)}`, (page) => adaptPage(page, adaptTarget));
 export const useFilters = (params: Params = {}) => useApiQuery<ListResponse<ProxyFilter>, PageDto<FilterDto>>(["filters", params], `/filters${buildQuery(params)}`, (page) => adaptPage(page, adaptFilter));
 export const usePools = (params: Params = {}) => useApiQuery<ListResponse<Pool>, PageDto<PoolDto>>(["pools", params], `/pools${buildQuery(params)}`, (page) => adaptPage(page, adaptPool));
+export const usePoolListLinks = (poolId: string) => useApiQuery<PoolListLink[], PoolListLinkDto[]>(["pool-list-links", poolId], `/pools/${poolId}/list-links`, (links) => links.map(adaptPoolListLink));
 export const useEndpoints = (params: Params = {}) => useApiQuery<ListResponse<Endpoint>, PageDto<EndpointDto>>(["endpoints", params], `/endpoints${buildQuery(params)}`, (page) => adaptPage(page, adaptEndpoint));
 export const useJobs = (params: Params = {}) => useApiQuery<ListResponse<JobRun>, PageDto<JobDto>>(["checks", params], `/checks${buildQuery(params)}`, (page) => adaptPage(page, adaptJob));
 export const useAdminWorkspaces = (params: Params = {}) => useApiQuery<ListResponse<AdminWorkspace>, PageDto<WorkspaceAdminDto>>(["admin", "workspaces", params], `/admin/workspaces${buildQuery(params)}`, (page) => adaptPage(page, adaptAdminWorkspace));

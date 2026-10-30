@@ -1,5 +1,5 @@
-import type { DashboardSummaryDto, EndpointCreatedDto, EndpointDto, FilterDto, JobDto, PageDto, PoolDto, ProxyDto, SourceDto, TargetDto, TrafficSummaryDto, WorkspaceAdminDto, WorkspaceSettingsDto } from "@/lib/api/dto";
-import type { AdminWorkspace, DashboardSummary, Endpoint, EndpointCredentials, JobRun, ListResponse, Pool, ProxyFilter, ProxyRecord, Source, Target, TrafficPoint, TrafficSummary, WorkspaceLimits, WorkspaceSettings } from "@/lib/api/types";
+import type { DashboardSummaryDto, EndpointCreatedDto, EndpointDto, FilterDto, JobDto, PageDto, PoolDto, PoolListLinkDto, ProxyDto, SourceDto, TargetDto, TrafficSummaryDto, WorkspaceAdminDto, WorkspaceSettingsDto } from "@/lib/api/dto";
+import type { AdminWorkspace, DashboardSummary, Endpoint, EndpointCredentials, JobRun, ListResponse, Pool, PoolListLink, ProxyFilter, ProxyRecord, Source, Target, TrafficPoint, TrafficSummary, WorkspaceLimits, WorkspaceSettings } from "@/lib/api/types";
 
 const countryNames = new Intl.DisplayNames(["en"], { type: "region" });
 
@@ -72,6 +72,10 @@ export function adaptFilter(dto: FilterDto): ProxyFilter {
 
 export function adaptPool(dto: PoolDto): Pool {
   return { id: dto.id, name: dto.name, filterName: dto.filter_id, strategy: dto.strategy, enabled: dto.enabled, catalogSelection: dto.catalog_selection, currentRevision: dto.current_revision ?? 0, eligibleCount: null, activeConnections: null, averageLatencyMs: null, updatedAt: dto.materialized_at ?? dto.created_at, materializedAt: dto.materialized_at ?? undefined };
+}
+
+export function adaptPoolListLink(dto: PoolListLinkDto): PoolListLink {
+  return { id: dto.id, poolId: dto.pool_id, name: dto.name, tokenPrefix: dto.token_prefix, includeGlobal: dto.include_global, lastUsedAt: dto.last_used_at ?? undefined, createdAt: dto.created_at };
 }
 
 export function adaptEndpoint(dto: EndpointDto): Endpoint {

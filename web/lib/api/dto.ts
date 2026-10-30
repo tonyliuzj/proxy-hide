@@ -139,6 +139,21 @@ export interface PoolDto {
   created_at: string;
 }
 
+export interface PoolListLinkDto {
+  id: string;
+  pool_id: string;
+  name: string;
+  token_prefix: string;
+  include_global: boolean;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export interface PoolListLinkCreatedDto extends PoolListLinkDto {
+  // Embeds the secret token; the API only returns it once, at creation.
+  url: string;
+}
+
 export interface EndpointDto {
   id: string;
   name: string;

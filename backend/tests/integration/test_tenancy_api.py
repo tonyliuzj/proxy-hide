@@ -455,3 +455,194 @@ async def test_open_endpoint_cannot_require_credentials_until_a_secret_is_issued
     assert issued.status_code == 200 and issued.json()["secret"]
     allowed = await client.patch(url, json={"require_auth": True}, headers=headers)
     assert allowed.status_code == 200 and allowed.json()["require_auth"] is True
+
+
+async def _publish_members(session_factory: SessionFactory, seeded: SeededTenancyData) -> None:
+    """Give the seeded pool a current revision holding every kind of member."""
+    from app.models import PoolMember, PoolRevision
+    from app.security import KeyRing
+
+    keyring = KeyRing.from_settings()
+    async with session_factory() as db:
+        own = await db.get(ProxyRoute, seeded.own_proxy_id)
+        assert own is not None
+        aad = f"proxy-route:{own.id}".encode()
+        own.username_encrypted = keyring.encrypt_text("user", associated_data=aad)
+        own.password_encrypted = keyring.encrypt_text("p@ss word", associated_data=aad)
+        socks = ProxyRoute(
+            workspace_id=seeded.workspace_one_id,
+            scope=ProxyScope.PRIVATE,
+            protocol=ProxyProtocol.SOCKS5,
+            host="2001:db8::1",
+            port=1080,
+            identity_hash="socks",
+        )
+        db.add(socks)
+        await db.flush()
+        db.add(ProxyHealth(proxy_id=socks.id))
+        db.add(
+            PoolRevision(
+                workspace_id=seeded.workspace_one_id,
+                pool_id=seeded.pool_id,
+                revision=1,
+                member_count=4,
+                rule_snapshot={},
+            )
+        )
+        await db.flush()
+        # The foreign workspace's proxy must never be served even if it were a member.
+        for ordinal, proxy_id in enumerate(
+            (seeded.own_proxy_id, socks.id, seeded.global_proxy_id, seeded.other_proxy_id)
+        ):
+            db.add(
+                PoolMember(pool_id=seeded.pool_id, revision=1, proxy_id=proxy_id, ordinal=ordinal)
+            )
+        pool = await db.get(Pool, seeded.pool_id)
+        assert pool is not None
+        pool.current_revision = 1
+        await db.commit()
+
+
+async def _create_link(
+    client: AsyncClient, csrf: str, pool_id: UUID, **overrides: object
+) -> tuple[int, dict]:
+    response = await client.post(
+        f"/api/v1/pools/{pool_id}/list-links",
+        json={"name": "Scraper", **overrides},
+        headers={"X-CSRF-Token": csrf},
+    )
+    return response.status_code, response.json()
+
+
+def _path(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    return urlsplit(url).path
+
+
+async def test_list_link_serves_only_the_workspaces_own_proxies_by_default(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    await _publish_members(session_factory, seeded)
+    csrf = await _login(client)
+
+    status, created = await _create_link(client, csrf, seeded.pool_id)
+    assert status == 201, created
+    assert created["url"].startswith("http://localhost:3000/api/v1/lists/ph_list_")
+    path = _path(created["url"])
+
+    client.cookies.clear()  # the link itself is the credential
+    response = await client.get(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert response.headers["cache-control"] == "no-store"
+    assert response.text.splitlines() == [
+        "http://user:p%40ss%20word@one.example:80",
+        "socks5://[2001:db8::1]:1080",
+    ]
+    assert response.headers["x-proxy-count"] == "2"
+    assert response.headers["x-excluded-global-count"] == "1"
+    assert "global.example" not in response.text and "two.example" not in response.text
+
+
+async def test_list_link_formats_and_protocol_filter(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    seeded = await _seed(session_factory)
+    await _publish_members(session_factory, seeded)
+    csrf = await _login(client)
+    _, created = await _create_link(client, csrf, seeded.pool_id)
+    path = _path(created["url"])
+    client.cookies.clear()
+
+    hostport = await client.get(path, params={"format": "hostport"})
+    assert hostport.text.splitlines() == ["one.example:80", "[2001:db8::1]:1080"]
+
+    socks_only = await client.get(path, params={"protocol": "socks5"})
+    assert socks_only.text.splitlines() == ["socks5://[2001:db8::1]:1080"]
+
+    as_json = await client.get(path, params={"format": "json"})
+    first = as_json.json()[0]
+    assert first["host"] == "one.example" and first["username"] == "user"
+    assert first["password"] == "p@ss word"
+
+
+async def test_global_proxies_need_both_the_link_opt_in_and_the_catalog_grant(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    from app.models import WorkspaceLimit
+
+    seeded = await _seed(session_factory)
+    await _publish_members(session_factory, seeded)
+    csrf = await _login(client)
+    _, created = await _create_link(client, csrf, seeded.pool_id, include_global=True)
+    path = _path(created["url"])
+    client.cookies.clear()
+
+    assert "global.example:80" in (await client.get(path)).text
+
+    async with session_factory() as db:
+        limits = await db.get(WorkspaceLimit, seeded.workspace_one_id)
+        assert limits is not None
+        limits.global_catalog_enabled = False
+        await db.commit()
+    revoked_grant = await client.get(path)
+    assert "global.example" not in revoked_grant.text
+    assert revoked_grant.headers["x-excluded-global-count"] == "1"
+
+    csrf = await _login(client)
+    status, error = await _create_link(
+        client, csrf, seeded.pool_id, name="Other", include_global=True
+    )
+    assert (status, error["error"]["code"]) == (403, "GLOBAL_CATALOG_DISABLED")
+
+
+async def test_revoked_unknown_and_suspended_links_look_identical(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    from app.models import Workspace, WorkspaceStatus
+
+    seeded = await _seed(session_factory)
+    await _publish_members(session_factory, seeded)
+    csrf = await _login(client)
+    _, created = await _create_link(client, csrf, seeded.pool_id)
+    path = _path(created["url"])
+
+    listed = await client.get(f"/api/v1/pools/{seeded.pool_id}/list-links")
+    assert listed.status_code == 200
+    assert "url" not in listed.json()[0] and "ph_list_" not in listed.text.replace(
+        created["token_prefix"], ""
+    )
+
+    async with session_factory() as db:
+        workspace = await db.get(Workspace, seeded.workspace_one_id)
+        assert workspace is not None
+        workspace.status = WorkspaceStatus.SUSPENDED
+        await db.commit()
+    suspended = await client.get(path)
+    async with session_factory() as db:
+        workspace = await db.get(Workspace, seeded.workspace_one_id)
+        assert workspace is not None
+        workspace.status = WorkspaceStatus.ACTIVE
+        await db.commit()
+
+    revoke = await client.delete(
+        f"/api/v1/pools/{seeded.pool_id}/list-links/{created['id']}",
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert revoke.status_code == 204
+    revoked = await client.get(path)
+    unknown = await client.get("/api/v1/lists/ph_list_does-not-exist")
+
+    assert {suspended.status_code, revoked.status_code, unknown.status_code} == {404}
+    assert suspended.text == revoked.text == unknown.text
+
+
+async def test_list_links_cannot_target_another_workspaces_pool(
+    client: AsyncClient, session_factory: SessionFactory
+) -> None:
+    await _seed(session_factory)
+    csrf = await _login(client)
+    status, error = await _create_link(client, csrf, UUID(int=1))
+    assert (status, error["error"]["code"]) == (404, "POOL_NOT_FOUND")

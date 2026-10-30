@@ -1,8 +1,9 @@
 "use client";
 
-import { MoreHorizontal, PauseCircle, Play, PlayCircle, RefreshCw, Trash2 } from "lucide-react";
+import { Link2, MoreHorizontal, PauseCircle, Play, PlayCircle, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { PoolDialog } from "@/components/dialogs/pool-dialog";
+import { PoolListLinksDialog } from "@/components/dialogs/pool-list-links-dialog";
 import { DataToolbar } from "@/components/data-toolbar";
 import { PageHeader } from "@/components/page-header";
 import { PaginationBar } from "@/components/pagination-bar";
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useState } from "react";
 import { useResourceParams } from "@/hooks/use-resource-params";
 import { api, ApiError } from "@/lib/api/client";
 import { strategyLabel } from "@/lib/api/strategies";
@@ -26,6 +28,7 @@ export default function PoolsPage() {
   const query = usePools({ page: Number(params.page), page_size: Number(params.page_size) });
   const filters = useFilters({ page_size: 100 });
   const queryClient = useQueryClient();
+  const [sharePool, setSharePool] = useState<Pool>();
   const filterNames = new Map(filters.data?.items.map((filter) => [filter.id, filter.name]));
   const rows = (query.data?.items ?? []).filter((pool) => `${pool.name} ${filterNames.get(pool.filterName) ?? ""}`.toLowerCase().includes(params.q.toLowerCase()));
 
@@ -61,10 +64,11 @@ export default function PoolsPage() {
           <TableCell>{filterNames.get(pool.filterName) ?? <span className="font-mono text-xs">{pool.filterName.slice(0, 8)}</span>}</TableCell>
           <TableCell><Badge variant="outline" className="capitalize">{pool.catalogSelection}</Badge></TableCell><TableCell>{strategyLabel(pool.strategy)}</TableCell><TableCell className="font-mono text-xs">{pool.currentRevision || "Pending"}</TableCell>
           <TableCell>{pool.eligibleCount === null ? <span className="text-muted-foreground">Not reported</span> : <span className="font-semibold tabular-nums">{pool.eligibleCount}</span>}</TableCell><TableCell><StatusBadge status={!pool.enabled ? "disabled" : pool.currentRevision ? "healthy" : "queued"} /></TableCell><TableCell className="text-xs text-muted-foreground">{formatRelativeTime(pool.updatedAt)}</TableCell>
-          <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`${pool.name} actions`}><MoreHorizontal /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => void materialize(pool)}><Play />Materialise now</DropdownMenuItem><DropdownMenuItem onSelect={() => void toggle(pool)}>{pool.enabled ? <PauseCircle /> : <PlayCircle />}{pool.enabled ? "Disable pool" : "Enable pool"}</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => void remove(pool)}><Trash2 />Delete pool</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell>
+          <TableCell><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon-sm" aria-label={`${pool.name} actions`}><MoreHorizontal /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => void materialize(pool)}><Play />Materialise now</DropdownMenuItem><DropdownMenuItem onSelect={() => void toggle(pool)}>{pool.enabled ? <PauseCircle /> : <PlayCircle />}{pool.enabled ? "Disable pool" : "Enable pool"}</DropdownMenuItem><DropdownMenuItem onSelect={() => setSharePool(pool)}><Link2 />Share list link</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" onSelect={() => void remove(pool)}><Trash2 />Delete pool</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell>
         </TableRow>)}</TableBody></Table>
         <PaginationBar page={query.data?.page ?? 1} pageSize={query.data?.page_size ?? 25} total={query.data?.total ?? 0} onPageChange={(page) => update({ page: String(page) }, false)} />
       </>}
     </Card></div>
+    {sharePool ? <PoolListLinksDialog pool={sharePool} onClose={() => setSharePool(undefined)} /> : null}
   </>;
 }

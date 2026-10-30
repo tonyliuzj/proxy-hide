@@ -92,6 +92,10 @@ class Settings(BaseSettings):
         default=1080,
         validation_alias=AliasChoices("PH_GATEWAY_SOCKS_PORT", "GATEWAY_SOCKS_PORT"),
     )
+    public_list_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("PH_PUBLIC_LIST_BASE_URL", "PUBLIC_LIST_BASE_URL"),
+    )
     gateway_listener_ports: str = Field(
         default="10000-10019",
         validation_alias=AliasChoices("PH_GATEWAY_LISTENER_PORTS", "GATEWAY_LISTENER_PORTS"),
@@ -128,6 +132,12 @@ class Settings(BaseSettings):
         if "+asyncpg" not in value and "+aiosqlite" not in value:
             raise ValueError("database_url must use an async SQLAlchemy driver")
         return value
+
+    @property
+    def list_base_url(self) -> str:
+        """Origin that serves ``/api/v1``; share links are built from it."""
+        configured = self.public_list_base_url.strip().rstrip("/")
+        return configured or (self.allowed_origins[0] if self.allowed_origins else "")
 
     @field_validator("gateway_listener_ports")
     @classmethod

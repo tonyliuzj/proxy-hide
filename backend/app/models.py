@@ -474,6 +474,30 @@ class PoolMember(Base):
     )
 
 
+class PoolListLink(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """A revocable secret URL that serves a pool's current members as a plain list."""
+
+    __tablename__ = "pool_list_links"
+
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
+    pool_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    token_prefix: Mapped[str] = mapped_column(String(16), nullable=False)
+    token_digest: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    # Global-catalog addresses are masked everywhere else, so a link opts in explicitly.
+    include_global: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["workspace_id", "pool_id"], ["pools.workspace_id", "pools.id"], ondelete="CASCADE"
+        ),
+        UniqueConstraint("workspace_id", "name", name="uq_pool_list_link_name"),
+    )
+
+
 class Endpoint(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "endpoints"
 

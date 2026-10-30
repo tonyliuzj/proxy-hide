@@ -20,6 +20,7 @@ from app.api import (
     endpoints,
     filters,
     inventory,
+    lists,
     notifications,
     operations,
     pools,
@@ -79,6 +80,8 @@ api.include_router(sources.router)
 api.include_router(targets.router)
 api.include_router(filters.router)
 api.include_router(pools.router)
+api.include_router(lists.router)
+api.include_router(lists.public_router)
 api.include_router(endpoints.router)
 api.include_router(checks.admin_router)
 api.include_router(checks.router)

@@ -62,6 +62,31 @@ Rotation is chosen per endpoint, or inherited from the pool:
 
 Within one connection the gateway tries up to three proxies before giving up, in every mode.
 
+## Share a list link
+
+For apps that want a list of proxies rather than one address, open a pool's menu in the
+console and choose **Share list link**. It creates a secret, revocable URL like
+`https://your-host/api/v1/lists/ph_list_...` that serves the pool's current members, so the
+list stays fresh as proxies are checked and replaced.
+
+| Query | Result |
+| --- | --- |
+| *(none)* | One `scheme://[user:pass@]host:port` per line |
+| `?format=hostport` | Plain `host:port` lines |
+| `?format=json` | Objects with host, port, credentials, country, latency and score |
+| `&protocol=http` | Only that type: `http`, `https`, `socks4a`, or `socks5` |
+
+The full URL is shown once and only a hash of the token is stored, so revoke and create
+a new link if it is lost. Anyone holding the URL can read the list, including upstream
+passwords, and the token appears in access logs of anything in front of the API.
+
+By default a link serves only the proxies your own workspace added. Global-catalog
+addresses are masked everywhere else in the app, so including them is a per-link opt-in
+that also requires the workspace's global catalog grant. The response header
+`X-Excluded-Global-Count` reports how many members were left out, which explains an
+unexpectedly short list. Set `PUBLIC_LIST_BASE_URL` if the API is served from a different
+origin than `WEB_ORIGIN`.
+
 ## Docker Hub images
 
 Only two project images are needed. Both are published in the private

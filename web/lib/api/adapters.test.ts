@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adaptDashboardSummary, adaptEndpointCredentials, adaptProxy, adaptTrafficSummary } from "@/lib/api/adapters";
+import { adaptDashboardSummary, adaptEndpointCredentials, adaptPoolListLink, adaptProxy, adaptTrafficSummary } from "@/lib/api/adapters";
 
 describe("API adapters", () => {
   it("keeps global proxy addresses masked", () => {
@@ -22,6 +22,13 @@ describe("API adapters", () => {
     expect(endpoint.requireAuth).toBe(false);
     expect(endpoint.strategy).toBe("sticky");
     expect(endpoint.secret).toBeNull();
+  });
+
+  it("maps a list link without ever exposing a token", () => {
+    const link = adaptPoolListLink({ id: "l1", pool_id: "pool1", name: "Scraper", token_prefix: "ph_list_ab12cd34", include_global: false, last_used_at: null, created_at: "2026-08-21T00:00:00Z" });
+    expect(link.tokenPrefix).toBe("ph_list_ab12cd34");
+    expect(link.lastUsedAt).toBeUndefined();
+    expect(Object.keys(link)).not.toContain("url");
   });
 
   it("maps dashboard jobs and traffic aggregates", () => {

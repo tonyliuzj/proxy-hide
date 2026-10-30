@@ -49,6 +49,15 @@ network. Do not forward these ports to the public internet.
 Deleting an endpoint closes its listening socket immediately; connections already open
 finish normally, as with credential changes.
 
+## Share list links
+
+`GET /api/v1/lists/{token}` is the only API route that is reachable without a session or
+API token; the secret URL is the credential. Unknown, revoked, and suspended-workspace
+tokens all return the same `404`. Responses are `no-store`, `noindex`, and
+`no-referrer`. Tokens are 256-bit, stored only as SHA-256 digests, and capped at ten per
+pool. Because the token sits in the URL path, keep it out of shared logs: configure any
+reverse proxy in front of the API to omit or redact `/api/v1/lists/` paths.
+
 ## Failure behavior
 
 - PostgreSQL is the authoritative source for workspaces, endpoint credentials,

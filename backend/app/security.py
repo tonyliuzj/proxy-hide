@@ -131,6 +131,10 @@ def generate_api_token() -> str:
     return f"ph_v1_{secrets.token_urlsafe(36)}"
 
 
+def generate_list_token() -> str:
+    return f"ph_list_{secrets.token_urlsafe(32)}"
+
+
 def digest_api_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 

@@ -93,6 +93,15 @@ Only two project images are needed. Both are published in the private
 `tonyliuzj/proxy-hide` Docker Hub repository, using the `backend` and `web`
 tags. PostgreSQL and Redis use their official images.
 
+The `docker` GitHub Actions workflow builds both images for `linux/amd64` and
+`linux/arm64` and pushes them with the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`
+repository secrets (the token needs Read & Write access, and the Docker Hub repository
+should already exist and be private). Each component gets a moving tag from `main`
+(`backend`, `web`), an immutable `backend-<short sha>` / `web-<short sha>` tag per
+commit, and `backend-1.2.3` / `web-1.2.3` when a `v1.2.3` tag is pushed. Pull requests
+only check that the images build. Pin a deployment to a commit or version tag instead of
+the moving tag when you need to roll back.
+
 `make up` builds the project images from the checked-out source. To deploy the
 published images instead, authenticate to Docker Hub and start Compose without
 building:
